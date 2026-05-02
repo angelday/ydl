@@ -26,3 +26,7 @@ Temporary Items
 
 # Logs
 *.log
+
+# Local manual test downloads
+manual-test/*
+!manual-test/.gitkeep

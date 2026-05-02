@@ -133,10 +133,10 @@ if [[ "$VIDEO_CODEC" != "h264" && "$VIDEO_CODEC" != "hevc" && "$VIDEO_CODEC" != 
     echo "Audio is already AAC; copying audio stream."
   else
     AUDIO_ARGS=(-c:a aac -b:a 192k)
-    echo "Re-encoding audio -> AAC..."
+    echo "Re-encoding audio → AAC..."
   fi
 
-  echo "Re-encoding $VIDEO_CODEC -> H.264 in MP4 container..."
+  echo "Re-encoding $VIDEO_CODEC → H.264 in MP4 container..."
   if ! ffmpeg -i "$INPUT_FILE" -c:v libx264 "${AUDIO_ARGS[@]}" -movflags faststart "$TEMP_FILE"; then
     rm -f "$TEMP_FILE"
     exit 1

@@ -129,7 +129,7 @@ test_vp9_download_converts_to_mp4() {
 
   [[ -f download.mp4 ]] || fail "converted mp4 exists"
   [[ ! -f download.webm ]] || fail "source webm removed after conversion"
-  assert_contains "$output" "Re-encoding vp9 -> H.264" "vp9 conversion starts"
+  assert_contains "$output" "Re-encoding vp9 → H.264" "vp9 conversion starts"
   assert_contains "$output" "Conversion complete:" "vp9 conversion completes"
 }
 
@@ -139,7 +139,7 @@ test_av1_download_converts_to_mp4() {
 
   [[ -f download.mp4 ]] || fail "converted av1 mp4 exists"
   [[ ! -f download.mkv ]] || fail "source mkv removed after conversion"
-  assert_contains "$output" "Re-encoding av1 -> H.264" "av1 conversion starts"
+  assert_contains "$output" "Re-encoding av1 → H.264" "av1 conversion starts"
 }
 
 test_conversion_refuses_existing_output() {

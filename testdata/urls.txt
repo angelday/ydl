@@ -1,0 +1,6 @@
+# Manual and automated test URLs for ydl.
+#
+# Keep one URL per line. Comment out URLs that should not be used by automated
+# tests.
+
+https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46
