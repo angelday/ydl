@@ -101,6 +101,7 @@ run_ytdlp() {
   local PROGRESS_RENDERED_FILE PROGRESS_ALREADY_DOWNLOADED_FILE
   local line percent speed eta
   YDL_LAST_ERROR_LOG=""
+  YDL_LAST_FAILURE_KIND=""
   PROGRESS_LAST_WHOLE=0
   PROGRESS_RENDERED=0
   PROGRESS_ALREADY_DOWNLOADED=0
@@ -183,12 +184,26 @@ run_ytdlp() {
     if [ -s "$LOG_FILE" ]; then
       YDL_LAST_ERROR_LOG=$(cat "$LOG_FILE")
       if [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"no video"* ]]; then
-        echo "No video could be found in this tweet."
+        if x_tweet_unavailable "$URL"; then
+          YDL_LAST_FAILURE_KIND="unavailable"
+          echo "Tweet unavailable."
+        else
+          YDL_LAST_FAILURE_KIND="no-video"
+          echo "No video could be found in this tweet."
+        fi
+      elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"suspended"* ]]; then
+        YDL_LAST_FAILURE_KIND="suspended"
+        echo "Account suspended."
+      elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"unsupported url"* ]]; then
+        YDL_LAST_FAILURE_KIND="unsupported"
+        echo "Unsupported URL."
       else
+        YDL_LAST_FAILURE_KIND="other"
         echo "Error: yt-dlp failed."
         cat "$LOG_FILE"
       fi
     else
+      YDL_LAST_FAILURE_KIND="other"
       echo "Error: yt-dlp failed."
     fi
   fi
@@ -199,6 +214,22 @@ run_ytdlp() {
 
   rm -f "$LOG_FILE" "$PROGRESS_RENDERED_FILE" "$PROGRESS_ALREADY_DOWNLOADED_FILE"
   return "$exit_code"
+}
+
+x_tweet_unavailable() {
+  local url="$1"
+  local id response
+
+  if [[ "$url" != *"x.com/"* && "$url" != *"twitter.com/"* ]]; then
+    return 1
+  fi
+  if [[ ! "$url" =~ '/status/([0-9]+)' ]]; then
+    return 1
+  fi
+  id="$match[1]"
+
+  response=$(curl -fsL --max-time 5 "https://cdn.syndication.twimg.com/tweet-result?id=$id" 2>/dev/null || true)
+  [[ "$response" == "{}" ]]
 }
 
 mark_no_video_url() {
@@ -218,7 +249,9 @@ mark_no_video_url() {
     MARKED_INPUT_TEXT="$updated"
     CLIPBOARD_CHANGED=1
     NO_VIDEO_MARKS=$((NO_VIDEO_MARKS + 1))
+    return 0
   fi
+  return 1
 }
 
 remove_clipboard_url() {
@@ -245,7 +278,9 @@ remove_clipboard_url() {
   if [[ "$updated" != "$MARKED_INPUT_TEXT" ]]; then
     MARKED_INPUT_TEXT="$updated"
     CLIPBOARD_CHANGED=1
+    return 0
   fi
+  return 1
 }
 
 run_ffmpeg() {
@@ -322,6 +357,12 @@ fi
 MARKED_INPUT_TEXT="$INPUT_TEXT"
 CLIPBOARD_CHANGED=0
 NO_VIDEO_MARKS=0
+COMPLETED_REMOVES=0
+SUSPENDED_REMOVES=0
+UNAVAILABLE_REMOVES=0
+SUSPENDED_FAILURES=0
+UNAVAILABLE_FAILURES=0
+NO_VIDEO_FAILURES=0
 
 ALL_URLS=("${(@f)$(extract_urls "$INPUT_TEXT" 0)}")
 if [ "${#ALL_URLS[@]}" -eq 1 ] && [ -z "$ALL_URLS[1]" ]; then
@@ -471,23 +512,60 @@ for URL in "${URLS[@]}"; do
   fi
   if ! download_one "$URL"; then
     FAILURES=$((FAILURES + 1))
-    if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 && "${(L)YDL_LAST_ERROR_LOG}" == *"no video"* ]]; then
-      mark_no_video_url "$URL"
+    LOWER_ERROR_LOG="${(L)YDL_LAST_ERROR_LOG}"
+    if [[ "$YDL_LAST_FAILURE_KIND" == "no-video" || ( -z "$YDL_LAST_FAILURE_KIND" && "$LOWER_ERROR_LOG" == *"no video"* ) ]]; then
+      NO_VIDEO_FAILURES=$((NO_VIDEO_FAILURES + 1))
+      if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+        mark_no_video_url "$URL" || true
+      fi
+    elif [[ "$YDL_LAST_FAILURE_KIND" == "unavailable" ]]; then
+      UNAVAILABLE_FAILURES=$((UNAVAILABLE_FAILURES + 1))
+      if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+        if remove_clipboard_url "$URL"; then
+          UNAVAILABLE_REMOVES=$((UNAVAILABLE_REMOVES + 1))
+        fi
+      fi
+    elif [[ "$YDL_LAST_FAILURE_KIND" == "suspended" || ( -z "$YDL_LAST_FAILURE_KIND" && "$LOWER_ERROR_LOG" == *"suspended"* ) ]]; then
+      SUSPENDED_FAILURES=$((SUSPENDED_FAILURES + 1))
+      if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+        if remove_clipboard_url "$URL"; then
+          SUSPENDED_REMOVES=$((SUSPENDED_REMOVES + 1))
+        fi
+      fi
     fi
   elif [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
-    remove_clipboard_url "$URL"
+    if remove_clipboard_url "$URL"; then
+      COMPLETED_REMOVES=$((COMPLETED_REMOVES + 1))
+    fi
   fi
 done
 
 if [[ "$FROM_CLIPBOARD" -eq 1 && "$CLIPBOARD_CHANGED" -eq 1 ]]; then
   print -rn -- "$MARKED_INPUT_TEXT" | pbcopy
   if [ "${#ALL_URLS[@]}" -gt 1 ]; then
-    if [[ "$NO_VIDEO_MARKS" -gt 0 ]]; then
-      if [[ "$NO_VIDEO_MARKS" -eq 1 ]]; then
-        echo "Clipboard updated: marked 1 unavailable video URL with [no-video]."
-      else
-        echo "Clipboard updated: marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]."
+    if [[ "$COMPLETED_REMOVES" -gt 0 || "$SUSPENDED_REMOVES" -gt 0 || "$UNAVAILABLE_REMOVES" -gt 0 || "$NO_VIDEO_MARKS" -gt 0 ]]; then
+      UPDATE_PARTS=()
+      if [[ "$COMPLETED_REMOVES" -eq 1 ]]; then
+        UPDATE_PARTS+=("removed 1 completed URL")
+      elif [[ "$COMPLETED_REMOVES" -gt 1 ]]; then
+        UPDATE_PARTS+=("removed $COMPLETED_REMOVES completed URLs")
       fi
+      if [[ "$SUSPENDED_REMOVES" -eq 1 ]]; then
+        UPDATE_PARTS+=("removed 1 suspended URL")
+      elif [[ "$SUSPENDED_REMOVES" -gt 1 ]]; then
+        UPDATE_PARTS+=("removed $SUSPENDED_REMOVES suspended URLs")
+      fi
+      if [[ "$UNAVAILABLE_REMOVES" -eq 1 ]]; then
+        UPDATE_PARTS+=("removed 1 unavailable URL")
+      elif [[ "$UNAVAILABLE_REMOVES" -gt 1 ]]; then
+        UPDATE_PARTS+=("removed $UNAVAILABLE_REMOVES unavailable URLs")
+      fi
+      if [[ "$NO_VIDEO_MARKS" -eq 1 ]]; then
+        UPDATE_PARTS+=("marked 1 unavailable video URL with [no-video]")
+      elif [[ "$NO_VIDEO_MARKS" -gt 1 ]]; then
+        UPDATE_PARTS+=("marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]")
+      fi
+      echo "Clipboard updated: ${(j:, :)UPDATE_PARTS}."
     else
       echo "Clipboard updated: removed completed URLs."
     fi
@@ -496,7 +574,33 @@ fi
 
 if [ "$FAILURES" -gt 0 ]; then
   if [[ "${#URLS[@]}" -gt 1 && ! ( "$FROM_CLIPBOARD" -eq 1 && "$NO_VIDEO_MARKS" -eq "$FAILURES" ) ]]; then
-    echo "Completed with $FAILURES failure(s)."
+    FAILURE_PARTS=()
+    if [[ "$SUSPENDED_FAILURES" -eq 1 ]]; then
+      FAILURE_PARTS+=("1 suspended account")
+    elif [[ "$SUSPENDED_FAILURES" -gt 1 ]]; then
+      FAILURE_PARTS+=("$SUSPENDED_FAILURES suspended accounts")
+    fi
+    if [[ "$NO_VIDEO_FAILURES" -eq 1 ]]; then
+      FAILURE_PARTS+=("1 unavailable video")
+    elif [[ "$NO_VIDEO_FAILURES" -gt 1 ]]; then
+      FAILURE_PARTS+=("$NO_VIDEO_FAILURES unavailable videos")
+    fi
+    if [[ "$UNAVAILABLE_FAILURES" -eq 1 ]]; then
+      FAILURE_PARTS+=("1 unavailable tweet")
+    elif [[ "$UNAVAILABLE_FAILURES" -gt 1 ]]; then
+      FAILURE_PARTS+=("$UNAVAILABLE_FAILURES unavailable tweets")
+    fi
+    OTHER_FAILURES=$((FAILURES - SUSPENDED_FAILURES - NO_VIDEO_FAILURES - UNAVAILABLE_FAILURES))
+    if [[ "$OTHER_FAILURES" -eq 1 ]]; then
+      FAILURE_PARTS+=("1 other failure")
+    elif [[ "$OTHER_FAILURES" -gt 1 ]]; then
+      FAILURE_PARTS+=("$OTHER_FAILURES other failures")
+    fi
+    if [[ "${#FAILURE_PARTS[@]}" -gt 0 ]]; then
+      echo "Completed with $FAILURES failure(s): ${(j:, :)FAILURE_PARTS}."
+    else
+      echo "Completed with $FAILURES failure(s)."
+    fi
   fi
   exit 1
 fi

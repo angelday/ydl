@@ -17,6 +17,14 @@
   available for raw `yt-dlp` and `ffmpeg` output.
 - Preserve `yt-dlp`'s already-downloaded signal in default output, including
   cases where `yt-dlp` also emits a trailing `100%` line.
+- Report known unsupported URLs with a concise default message while preserving
+  raw backend details in verbose mode.
+- Report suspended accounts with a concise default message, remove suspended
+  URLs from multi-URL clipboard queues, and include suspended accounts in the
+  final failure summary.
+- Distinguish missing/deleted X tweets from tweets that simply have no video;
+  unavailable tweets are removed from multi-URL clipboard queues instead of
+  being marked `[no-video]`.
 - Capture the downloaded filepath from the original `yt-dlp` run instead of
   invoking `yt-dlp` a second time after download.
 - Refuse to overwrite an existing `.mp4` when converting a non-MP4 download.

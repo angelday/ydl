@@ -71,6 +71,22 @@ if [[ -n "$YDL_STUB_FAIL_FIRST" && "$count" -eq 1 ]]; then
   exit 1
 fi
 
+if [[ -n "$YDL_STUB_SUSPEND_FIRST" && "$count" -eq 1 ]]; then
+  print -u2 -- "ERROR: [twitter] fake: Suspended"
+  exit 1
+fi
+
+if [[ -n "$YDL_STUB_NO_VIDEO_THIRD" && "$count" -eq 3 ]]; then
+  print -u2 -- "ERROR: [twitter] fake: No video could be found in this tweet"
+  exit 1
+fi
+
+if [[ -n "$YDL_STUB_UNSUPPORTED" ]]; then
+  print -u2 -- "WARNING: [generic] Falling back on generic information extractor"
+  print -u2 -- "ERROR: Unsupported URL: https://example.com/"
+  exit 1
+fi
+
 if [[ "$emit_progress" -eq 0 ]]; then
   print -r -- "stub yt-dlp raw output"
 fi
@@ -132,7 +148,18 @@ set -e
 cat > "$YDL_STUB_CLIPBOARD_FILE"
 STUB
 
-  chmod +x "$dir/yt-dlp" "$dir/ffprobe" "$dir/ffmpeg" "$dir/pbpaste" "$dir/pbcopy"
+  cat > "$dir/curl" <<'STUB'
+#!/bin/zsh
+set -e
+
+if [[ -n "$YDL_STUB_TWEET_UNAVAILABLE" ]]; then
+  print -r -- "{}"
+else
+  print -r -- '{"id_str":"fake","text":"available tweet"}'
+fi
+STUB
+
+  chmod +x "$dir/yt-dlp" "$dir/ffprobe" "$dir/ffmpeg" "$dir/pbpaste" "$dir/pbcopy" "$dir/curl"
 }
 
 with_tmp() {
@@ -298,9 +325,48 @@ test_unknown_speed_is_hidden() {
   assert_not_contains "$output" "Unknown B/s" "unknown speed is hidden"
 }
 
+test_unsupported_url_is_reported_cleanly() {
+  local output exit_code
+
+  set +e
+  output=$(YDL_STUB_UNSUPPORTED=1 "$BIN" "https://example.com/" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "unsupported URL exits with status 1"
+  assert_contains "$output" "Unsupported URL." "unsupported URL is reported cleanly"
+  assert_not_contains "$output" "Falling back on generic information extractor" "unsupported URL hides backend warning"
+  assert_not_contains "$output" "Error: yt-dlp failed." "unsupported URL hides generic backend error header"
+}
+
+test_suspended_account_is_reported_cleanly() {
+  local output exit_code
+
+  set +e
+  output=$(YDL_STUB_SUSPEND_FIRST=1 "$BIN" "https://example.com/suspended" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "suspended URL exits with status 1"
+  assert_contains "$output" "Account suspended." "suspended account is reported cleanly"
+  assert_not_contains "$output" "Error: yt-dlp failed." "suspended account hides backend error header"
+}
+
+test_verbose_unsupported_url_shows_backend_output() {
+  local output exit_code
+
+  set +e
+  output=$(YDL_STUB_UNSUPPORTED=1 "$BIN" --verbose "https://example.com/" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "verbose unsupported URL exits with status 1"
+  assert_contains "$output" "Unsupported URL: https://example.com/" "verbose unsupported URL shows backend output"
+}
+
 test_multi_url_continues_after_failure() {
   local input output exit_code
-  input=$'https://example.com/bad\nhttps://example.com/good'
+  input=$'https://x.com/example/status/12345\nhttps://example.com/good'
 
   set +e
   output=$(YDL_STUB_FAIL_FIRST=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input" 2>&1)
@@ -313,7 +379,20 @@ test_multi_url_continues_after_failure() {
   assert_not_contains "$output" "Error: yt-dlp failed." "known no-video failure hides backend error header"
   assert_not_contains "$output" "Continuing with next URL." "failure continuation is implicit"
   assert_contains "$output" "Downloading: https://example.com/good" "second URL is attempted"
-  assert_contains "$output" "Completed with 1 failure(s)." "failure summary is reported"
+  assert_contains "$output" "Completed with 1 failure(s): 1 unavailable video." "failure summary is reported"
+}
+
+test_unavailable_tweet_is_reported_cleanly() {
+  local output exit_code
+
+  set +e
+  output=$(YDL_STUB_FAIL_FIRST=1 YDL_STUB_TWEET_UNAVAILABLE=1 "$BIN" "https://x.com/example/status/12345" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "unavailable tweet exits with status 1"
+  assert_contains "$output" "Tweet unavailable." "unavailable tweet is reported cleanly"
+  assert_not_contains "$output" "No video could be found" "unavailable tweet is not mislabeled no-video"
 }
 
 test_clipboard_no_video_marks_url() {
@@ -327,11 +406,51 @@ test_clipboard_no_video_marks_url() {
   set -e
 
   [[ "$exit_code" -eq 1 ]] || fail "clipboard no-video exits with status 1"
-  assert_contains "$output" "Clipboard updated: marked 1 unavailable video URL with [no-video]." "clipboard update is reported"
+  assert_contains "$output" "Clipboard updated: removed 1 completed URL, marked 1 unavailable video URL with [no-video]." "clipboard update is reported"
   assert_contains "$(cat "$clipboard")" "[no-video]https://x.com/example/status/2049843950844834075?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "failed query URL is marked in clipboard"
   assert_not_contains "$(cat "$clipboard")" "https://example.com/good" "successful URL is removed from clipboard"
   assert_not_contains "$(cat "$clipboard")" "[no-video]https://example.com/good" "successful URL is not marked"
   assert_not_contains "$output" "Completed with 1 failure(s)." "all-marked clipboard no-video failures do not print failure summary"
+}
+
+test_clipboard_suspended_is_removed_and_counted() {
+  local output exit_code clipboard contents
+  clipboard="$PWD/clipboard.txt"
+  print -r -- $'Watch these:\nhttps://example.com/suspended\nhttps://example.com/good\nhttps://example.com/no-video' > "$clipboard"
+
+  set +e
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_SUSPEND_FIRST=1 YDL_STUB_NO_VIDEO_THIRD=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" 2>&1)
+  exit_code=$?
+  set -e
+  contents=$(cat "$clipboard")
+
+  [[ "$exit_code" -eq 1 ]] || fail "clipboard suspended/no-video exits with status 1"
+  assert_contains "$output" "Account suspended." "suspended account is reported cleanly in clipboard batch"
+  assert_contains "$output" "No video could be found in this tweet." "no-video is reported cleanly in clipboard batch"
+  assert_contains "$output" "Clipboard updated: removed 1 completed URL, removed 1 suspended URL, marked 1 unavailable video URL with [no-video]." "clipboard update summarizes suspended and no-video"
+  assert_contains "$output" "Completed with 2 failure(s): 1 suspended account, 1 unavailable video." "final stat includes suspended account"
+  assert_not_contains "$contents" "https://example.com/suspended" "suspended URL is removed from clipboard"
+  assert_not_contains "$contents" "https://example.com/good" "successful URL is removed from clipboard"
+  assert_contains "$contents" "[no-video]https://example.com/no-video" "no-video URL is marked in clipboard"
+}
+
+test_clipboard_unavailable_tweet_is_removed() {
+  local output exit_code clipboard contents
+  clipboard="$PWD/clipboard.txt"
+  print -r -- $'Watch these:\nhttps://x.com/example/status/12345\nhttps://example.com/good' > "$clipboard"
+
+  set +e
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_FAIL_FIRST=1 YDL_STUB_TWEET_UNAVAILABLE=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" 2>&1)
+  exit_code=$?
+  set -e
+  contents=$(cat "$clipboard")
+
+  [[ "$exit_code" -eq 1 ]] || fail "clipboard unavailable tweet exits with status 1"
+  assert_contains "$output" "Tweet unavailable." "unavailable tweet is reported in clipboard batch"
+  assert_contains "$output" "Clipboard updated: removed 1 completed URL, removed 1 unavailable URL." "clipboard update summarizes unavailable tweet"
+  assert_contains "$output" "Completed with 1 failure(s): 1 unavailable tweet." "final stat includes unavailable tweet"
+  assert_not_contains "$contents" "https://x.com/example/status/12345" "unavailable tweet is removed from clipboard"
+  assert_not_contains "$contents" "[no-video]" "unavailable tweet is not marked no-video"
 }
 
 test_no_video_marker_is_not_retried() {
@@ -368,7 +487,7 @@ test_clipboard_rewrite_preserves_spacing() {
   output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN")
   expected=$'Title\n\n\n\nNotes after'
 
-  assert_contains "$output" "Clipboard updated: removed completed URLs." "completed clipboard update is reported"
+  assert_contains "$output" "Clipboard updated: removed 2 completed URLs." "completed clipboard update is reported"
   [[ "$(cat "$clipboard")" == "$expected" ]] || fail "clipboard rewrite preserves spacing"
 }
 
@@ -401,8 +520,14 @@ with_tmp "single note fixture" test_single_note_fixture_downloads_one
 with_tmp "x note fixture" test_x_note_fixture_extracts_urls
 with_tmp "sm note fixture" test_sm_note_fixture_extracts_urls
 with_tmp "unknown speed hidden" test_unknown_speed_is_hidden
+with_tmp "unsupported URL clean output" test_unsupported_url_is_reported_cleanly
+with_tmp "verbose unsupported URL backend output" test_verbose_unsupported_url_shows_backend_output
+with_tmp "suspended account clean output" test_suspended_account_is_reported_cleanly
 with_tmp "multi URL continues after failure" test_multi_url_continues_after_failure
+with_tmp "unavailable tweet clean output" test_unavailable_tweet_is_reported_cleanly
 with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
+with_tmp "clipboard suspended removal and stats" test_clipboard_suspended_is_removed_and_counted
+with_tmp "clipboard unavailable tweet removal" test_clipboard_unavailable_tweet_is_removed
 with_tmp "no-video marker is not retried" test_no_video_marker_is_not_retried
 with_tmp "clipboard only marked URLs" test_clipboard_only_marked_urls_is_done
 with_tmp "clipboard rewrite preserves spacing" test_clipboard_rewrite_preserves_spacing
