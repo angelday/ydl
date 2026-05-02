@@ -194,6 +194,9 @@ run_ytdlp() {
       elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"suspended"* ]]; then
         YDL_LAST_FAILURE_KIND="suspended"
         echo "Account suspended."
+      elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"[instagram]"* && ( "${(L)YDL_LAST_ERROR_LOG}" == *"empty media response"* || "${(L)YDL_LAST_ERROR_LOG}" == *"no csrf token set"* ) ]]; then
+        YDL_LAST_FAILURE_KIND="unavailable"
+        echo "Instagram post unavailable."
       elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"unsupported url"* ]]; then
         YDL_LAST_FAILURE_KIND="unsupported"
         echo "Unsupported URL."
@@ -596,9 +599,9 @@ if [ "$FAILURES" -gt 0 ]; then
       FAILURE_PARTS+=("$NO_VIDEO_FAILURES unavailable videos")
     fi
     if [[ "$UNAVAILABLE_FAILURES" -eq 1 ]]; then
-      FAILURE_PARTS+=("1 unavailable tweet")
+      FAILURE_PARTS+=("1 unavailable post")
     elif [[ "$UNAVAILABLE_FAILURES" -gt 1 ]]; then
-      FAILURE_PARTS+=("$UNAVAILABLE_FAILURES unavailable tweets")
+      FAILURE_PARTS+=("$UNAVAILABLE_FAILURES unavailable posts")
     fi
     OTHER_FAILURES=$((FAILURES - SUSPENDED_FAILURES - NO_VIDEO_FAILURES - UNAVAILABLE_FAILURES))
     if [[ "$OTHER_FAILURES" -eq 1 ]]; then

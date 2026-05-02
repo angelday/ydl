@@ -87,6 +87,12 @@ if [[ -n "$YDL_STUB_UNSUPPORTED" ]]; then
   exit 1
 fi
 
+if [[ -n "$YDL_STUB_INSTAGRAM_UNAVAILABLE" && "$count" -eq 1 ]]; then
+  print -u2 -- "WARNING: [Instagram] Bm__BEMDvCw: No csrf token set by Instagram API"
+  print -u2 -- "ERROR: [Instagram] Bm__BEMDvCw: Instagram sent an empty media response."
+  exit 1
+fi
+
 if [[ "$emit_progress" -eq 0 ]]; then
   print -r -- "stub yt-dlp raw output"
 fi
@@ -395,6 +401,20 @@ test_unavailable_tweet_is_reported_cleanly() {
   assert_not_contains "$output" "No video could be found" "unavailable tweet is not mislabeled no-video"
 }
 
+test_unavailable_instagram_post_is_reported_cleanly() {
+  local output exit_code
+
+  set +e
+  output=$(YDL_STUB_INSTAGRAM_UNAVAILABLE=1 "$BIN" "https://www.instagram.com/p/BoFlubPFowe/" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "unavailable Instagram post exits with status 1"
+  assert_contains "$output" "Instagram post unavailable." "unavailable Instagram post is reported cleanly"
+  assert_not_contains "$output" "No csrf token" "unavailable Instagram post hides csrf warning"
+  assert_not_contains "$output" "Error: yt-dlp failed." "unavailable Instagram post hides backend error header"
+}
+
 test_clipboard_no_video_marks_url() {
   local output exit_code clipboard
   clipboard="$PWD/clipboard.txt"
@@ -448,9 +468,28 @@ test_clipboard_unavailable_tweet_is_removed() {
   [[ "$exit_code" -eq 1 ]] || fail "clipboard unavailable tweet exits with status 1"
   assert_contains "$output" "Tweet unavailable." "unavailable tweet is reported in clipboard batch"
   assert_contains "$output" "Clipboard updated: removed 1 completed URL, removed 1 unavailable URL." "clipboard update summarizes unavailable tweet"
-  assert_contains "$output" "Completed with 1 failure(s): 1 unavailable tweet." "final stat includes unavailable tweet"
+  assert_contains "$output" "Completed with 1 failure(s): 1 unavailable post." "final stat includes unavailable tweet"
   assert_not_contains "$contents" "https://x.com/example/status/12345" "unavailable tweet is removed from clipboard"
   assert_not_contains "$contents" "[no-video]" "unavailable tweet is not marked no-video"
+}
+
+test_clipboard_unavailable_instagram_post_is_removed() {
+  local output exit_code clipboard contents
+  clipboard="$PWD/clipboard.txt"
+  print -r -- $'Watch these:\nhttps://www.instagram.com/p/BoFlubPFowe/?utm_source=ig_share_sheet\nhttps://example.com/good' > "$clipboard"
+
+  set +e
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_INSTAGRAM_UNAVAILABLE=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" 2>&1)
+  exit_code=$?
+  set -e
+  contents=$(cat "$clipboard")
+
+  [[ "$exit_code" -eq 1 ]] || fail "clipboard unavailable Instagram post exits with status 1"
+  assert_contains "$output" "Instagram post unavailable." "unavailable Instagram post is reported in clipboard batch"
+  assert_contains "$output" "Clipboard updated: removed 1 completed URL, removed 1 unavailable URL." "clipboard update summarizes unavailable Instagram post"
+  assert_contains "$output" "Completed with 1 failure(s): 1 unavailable post." "final stat includes unavailable Instagram post"
+  assert_not_contains "$contents" "https://www.instagram.com/p/BoFlubPFowe/" "unavailable Instagram post is removed from clipboard"
+  assert_not_contains "$contents" "[no-video]" "unavailable Instagram post is not marked no-video"
 }
 
 test_no_video_marker_is_not_retried() {
@@ -525,9 +564,11 @@ with_tmp "verbose unsupported URL backend output" test_verbose_unsupported_url_s
 with_tmp "suspended account clean output" test_suspended_account_is_reported_cleanly
 with_tmp "multi URL continues after failure" test_multi_url_continues_after_failure
 with_tmp "unavailable tweet clean output" test_unavailable_tweet_is_reported_cleanly
+with_tmp "unavailable Instagram post clean output" test_unavailable_instagram_post_is_reported_cleanly
 with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
 with_tmp "clipboard suspended removal and stats" test_clipboard_suspended_is_removed_and_counted
 with_tmp "clipboard unavailable tweet removal" test_clipboard_unavailable_tweet_is_removed
+with_tmp "clipboard unavailable Instagram post removal" test_clipboard_unavailable_instagram_post_is_removed
 with_tmp "no-video marker is not retried" test_no_video_marker_is_not_retried
 with_tmp "clipboard only marked URLs" test_clipboard_only_marked_urls_is_done
 with_tmp "clipboard rewrite preserves spacing" test_clipboard_rewrite_preserves_spacing
