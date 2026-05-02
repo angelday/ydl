@@ -39,6 +39,7 @@ make_stubs() {
 set -e
 
 outfile="$PWD/download.${YDL_STUB_EXT:-webm}"
+counter_file="$PWD/.ydl-stub-count"
 print_file=""
 next_is_print_template=0
 next_is_print_file=0
@@ -62,11 +63,27 @@ for arg in "$@"; do
   fi
 done
 
+count=0
+if [[ -f "$counter_file" ]]; then
+  count=$(<"$counter_file")
+fi
+count=$((count + 1))
+print -r -- "$count" > "$counter_file"
+
+if [[ -n "$YDL_STUB_FAIL_FIRST" && "$count" -eq 1 ]]; then
+  print -u2 -- "ERROR: [twitter] fake: No video could be found in this tweet"
+  exit 1
+fi
+
 if [[ "$emit_progress" -eq 0 ]]; then
   print -r -- "stub yt-dlp raw output"
 fi
 
-print -r -- "stub download" > "$outfile"
+if [[ "$YDL_STUB_UNIQUE_OUTPUTS" -eq 1 ]]; then
+  outfile="$PWD/download-$count.${YDL_STUB_EXT:-webm}"
+fi
+
+print -r -- "stub download $count" > "$outfile"
 
 if [[ -n "$print_file" ]]; then
   print -r -- "$outfile" > "$print_file"
@@ -100,7 +117,21 @@ out="${@[-1]}"
 print -r -- "stub conversion" > "$out"
 STUB
 
-  chmod +x "$dir/yt-dlp" "$dir/ffprobe" "$dir/ffmpeg"
+  cat > "$dir/pbpaste" <<'STUB'
+#!/bin/zsh
+set -e
+
+cat "$YDL_STUB_CLIPBOARD_FILE"
+STUB
+
+  cat > "$dir/pbcopy" <<'STUB'
+#!/bin/zsh
+set -e
+
+cat > "$YDL_STUB_CLIPBOARD_FILE"
+STUB
+
+  chmod +x "$dir/yt-dlp" "$dir/ffprobe" "$dir/ffmpeg" "$dir/pbpaste" "$dir/pbcopy"
 }
 
 with_tmp() {
@@ -245,6 +276,40 @@ test_x_note_fixture_extracts_urls() {
   assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "second x URL extracted"
 }
 
+test_multi_url_continues_after_failure() {
+  local input output exit_code
+  input=$'https://example.com/bad\nhttps://example.com/good'
+
+  set +e
+  output=$(YDL_STUB_FAIL_FIRST=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "multi-url failure exits with status 1"
+  [[ -f download-2.mp4 ]] || fail "second URL still downloads after first failure"
+  assert_contains "$output" "No video could be found" "first failure is reported"
+  assert_contains "$output" "Continuing with next URL." "failure continuation is reported"
+  assert_contains "$output" "Downloading: https://example.com/good" "second URL is attempted"
+  assert_contains "$output" "Completed with 1 failure(s)." "failure summary is reported"
+}
+
+test_clipboard_no_video_marks_url() {
+  local output exit_code clipboard
+  clipboard="$PWD/clipboard.txt"
+  print -r -- $'Watch these:\nhttps://x.com/example/status/2049843950844834075?s=46&t=VOhZI1qhfsq28OaSCFJNFg\nhttps://example.com/good' > "$clipboard"
+
+  set +e
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_FAIL_FIRST=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "clipboard no-video exits with status 1"
+  assert_contains "$output" "Clipboard updated with [no-video] marker(s)." "clipboard update is reported"
+  assert_contains "$(cat "$clipboard")" "[no-video]https://x.com/example/status/2049843950844834075?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "failed query URL is marked in clipboard"
+  assert_contains "$(cat "$clipboard")" "https://example.com/good" "successful URL remains in clipboard"
+  assert_not_contains "$(cat "$clipboard")" "[no-video]https://example.com/good" "successful URL is not marked"
+}
+
 test_help
 pass "help output"
 
@@ -261,5 +326,7 @@ with_tmp "prose with multiple URLs" test_prose_with_multiple_urls_downloads_each
 with_tmp "messy note fixture" test_messy_note_fixture_extracts_urls
 with_tmp "single note fixture" test_single_note_fixture_downloads_one
 with_tmp "x note fixture" test_x_note_fixture_extracts_urls
+with_tmp "multi URL continues after failure" test_multi_url_continues_after_failure
+with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
 
 print -- "$TEST_COUNT tests passed"

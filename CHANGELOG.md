@@ -4,6 +4,8 @@
 
 - Extract URLs from pasted text, so notes or prose containing multiple links can
   be downloaded sequentially.
+- When running from clipboard input, mark URLs that fail because no video is
+  available by rewriting the clipboard text with `[no-video]` before the URL.
 - Show a concise ASCII download progress bar by default, with `-v`/`--verbose`
   available for raw `yt-dlp` and `ffmpeg` output.
 - Capture the downloaded filepath from the original `yt-dlp` run instead of
