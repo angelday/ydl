@@ -18,6 +18,21 @@ they do not download anything and do not need network access.
 Put larger local fixtures or manual-download samples in `testdata/`. The
 directory is ignored by git except for its `.gitkeep`.
 
+Reusable pasted-note fixtures live in `testdata/`:
+
+- `notes-single.txt`
+- `notes-multiple.txt`
+- `notes-messy.txt`
+- `notes-x.txt`
+- `urls.txt`
+
+Use `manual-test/` as the ignored scratch directory for real downloads:
+
+```sh
+cd manual-test
+../ydl "$(cat ../testdata/notes-multiple.txt)"
+```
+
 ## Install
 
 Deploy the checked-out script to the command location:

@@ -34,6 +34,8 @@ outfile="$PWD/download.${YDL_STUB_EXT:-webm}"
 print_file=""
 next_is_print_template=0
 next_is_print_file=0
+next_is_progress_template=0
+emit_progress=0
 
 for arg in "$@"; do
   if [[ "$next_is_print_file" -eq 1 ]]; then
@@ -44,13 +46,28 @@ for arg in "$@"; do
     next_is_print_file=1
   elif [[ "$arg" == "--print-to-file" ]]; then
     next_is_print_template=1
+  elif [[ "$next_is_progress_template" -eq 1 ]]; then
+    emit_progress=1
+    next_is_progress_template=0
+  elif [[ "$arg" == "--progress-template" ]]; then
+    next_is_progress_template=1
   fi
 done
+
+if [[ "$emit_progress" -eq 0 ]]; then
+  print -r -- "stub yt-dlp raw output"
+fi
 
 print -r -- "stub download" > "$outfile"
 
 if [[ -n "$print_file" ]]; then
   print -r -- "$outfile" > "$print_file"
+fi
+
+if [[ "$emit_progress" -eq 1 ]]; then
+  print -r -- " 50.0%|1.0MiB/s|Unknown"
+  print -r -- " 49.0%|1.0MiB/s|Unknown"
+  print -r -- "100.0%|1.0MiB/s|00:00"
 fi
 STUB
 
@@ -101,6 +118,7 @@ test_help() {
   output=$("$BIN" -h)
   assert_contains "$output" "ydl 1.3.0-dev" "help shows version"
   assert_contains "$output" "Usage: ydl" "help shows usage"
+  assert_contains "$output" "--verbose" "help shows verbose option"
 }
 
 test_invalid_url() {
@@ -119,8 +137,17 @@ test_h264_download_skips_conversion() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video")
 
   [[ -f download.mp4 ]] || fail "downloaded file exists"
+  assert_contains "$output" "Download [############------------]  50%" "download progress is rendered"
+  assert_contains "$output" "Download [########################] 100%" "download progress reaches 100"
   assert_contains "$output" "Detected video codec: h264" "h264 codec reported"
   assert_contains "$output" "No conversion needed." "h264 skips conversion"
+}
+
+test_verbose_shows_backend_output() {
+  local output
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" --verbose "https://example.com/video")
+
+  assert_contains "$output" "stub yt-dlp raw output" "verbose shows raw yt-dlp output"
 }
 
 test_vp9_download_converts_to_mp4() {
@@ -158,12 +185,43 @@ test_conversion_refuses_existing_output() {
 
 test_prose_with_multiple_urls_downloads_each() {
   local input output
-  input=$'Some note text before https://example.com/one.\nThen another link: https://example.com/two?s=46) and trailing prose.'
+  input=$(cat "$ROOT/testdata/notes-multiple.txt")
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_contains "$output" "Found 2 URLs. Downloading one by one." "multi-url count reported"
-  assert_contains "$output" "Downloading: https://example.com/one" "first URL extracted from prose"
-  assert_contains "$output" "Downloading: https://example.com/two?s=46" "second URL strips closing punctuation"
+  assert_contains "$output" "Found 3 URLs. Downloading one by one." "multi-url count reported"
+  assert_contains "$output" "Downloading: https://example.com/video/one" "first fixture URL extracted"
+  assert_contains "$output" "Downloading: https://example.com/video/two?s=46" "second fixture URL strips trailing period"
+  assert_contains "$output" "Downloading: https://example.com/video/three" "third fixture URL strips closing parenthesis"
+}
+
+test_messy_note_fixture_extracts_urls() {
+  local input output
+  input=$(cat "$ROOT/testdata/notes-messy.txt")
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_contains "$output" "Found 4 URLs. Downloading one by one." "messy fixture count reported"
+  assert_contains "$output" "Downloading: https://example.com/video/markdown" "markdown fixture URL extracted"
+  assert_contains "$output" "Downloading: https://example.com/video/quoted" "quoted fixture URL extracted"
+  assert_contains "$output" "Downloading: https://example.com/video/punctuation" "trailing punctuation stripped"
+  assert_contains "$output" "Downloading: https://example.com/video/curly" "curly wrapper stripped"
+}
+
+test_single_note_fixture_downloads_one() {
+  local input output
+  input=$(cat "$ROOT/testdata/notes-single.txt")
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_contains "$output" "Downloading: https://example.com/video/single?s=46" "single fixture URL extracted"
+}
+
+test_x_note_fixture_extracts_urls() {
+  local input output
+  input=$(cat "$ROOT/testdata/notes-x.txt")
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_contains "$output" "Found 2 URLs. Downloading one by one." "x fixture count reported"
+  assert_contains "$output" "Downloading: https://x.com/antoinellorca/status/2049796325160423678/video/1?s=46" "first x URL extracted"
+  assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "second x URL extracted"
 }
 
 test_help
@@ -173,9 +231,13 @@ test_invalid_url
 pass "invalid URL handling"
 
 with_tmp "h264 path" test_h264_download_skips_conversion
+with_tmp "verbose backend output" test_verbose_shows_backend_output
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
 with_tmp "av1 conversion path" test_av1_download_converts_to_mp4
 with_tmp "existing output protection" test_conversion_refuses_existing_output
 with_tmp "prose with multiple URLs" test_prose_with_multiple_urls_downloads_each
+with_tmp "messy note fixture" test_messy_note_fixture_extracts_urls
+with_tmp "single note fixture" test_single_note_fixture_downloads_one
+with_tmp "x note fixture" test_x_note_fixture_extracts_urls
 
 print -- "$TEST_COUNT tests passed"

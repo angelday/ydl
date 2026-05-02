@@ -1,0 +1,9 @@
+Things to download:
+
+First link:
+https://example.com/video/one
+
+Second link inline: https://example.com/video/two?s=46.
+
+Third link wrapped in parentheses:
+(https://example.com/video/three)

@@ -1,0 +1,13 @@
+Messy pasted note.
+
+Markdown-ish link:
+[watch this](https://example.com/video/markdown)
+
+Quoted URL:
+"https://example.com/video/quoted"
+
+Trailing punctuation:
+https://example.com/video/punctuation!
+
+Curly wrapper:
+{https://example.com/video/curly}

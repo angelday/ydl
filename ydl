@@ -11,6 +11,24 @@ looks_like_url() {
   [[ "$1" =~ '^(https?|ftp)://[^[:space:]]+$' ]]
 }
 
+show_help() {
+  echo "ydl $VERSION"
+  echo "Usage: ydl [-v] [-c [browser]] ['URL or text with URLs'] [extra yt-dlp args...]"
+  echo ""
+  echo "Downloads the best available video using yt-dlp, preferring H.264/H.265."
+  echo "If no input is given, reads URLs from clipboard text."
+  echo "If input contains multiple URLs, downloads them one by one."
+  echo "Non-H.264/H.265 videos are automatically re-encoded to H.264."
+  echo ""
+  echo "URL should be wrapped in quotes to avoid shell interpretation."
+  echo "Accepted URL schemes: http, https, ftp."
+  echo ""
+  echo "Options:"
+  echo "  -c [browser]   Use cookies from browser (default: safari)"
+  echo "  -v, --verbose  Show raw yt-dlp and ffmpeg output"
+  echo "  -h, --help     Show this help"
+}
+
 extract_urls() {
   local input="$1"
   local url
@@ -24,34 +42,171 @@ extract_urls() {
   done
 }
 
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-  echo "ydl $VERSION"
-  echo "Usage: ydl [-c [browser]] ['URL or text with URLs'] [extra yt-dlp args...]"
-  echo ""
-  echo "Downloads the best available video using yt-dlp, preferring H.264/H.265."
-  echo "If no input is given, reads URLs from clipboard text."
-  echo "If input contains multiple URLs, downloads them one by one."
-  echo "Non-H.264/H.265 videos are automatically re-encoded to H.264."
-  echo ""
-  echo "URL should be wrapped in quotes to avoid shell interpretation."
-  echo "Accepted URL schemes: http, https, ftp."
-  echo ""
-  echo "Options:"
-  echo "  -c [browser]  Use cookies from browser (default: safari)"
-  echo "  -h            Show this help"
-  exit 0
-fi
+render_progress() {
+  local percent_text="$1"
+  local speed="${2:-}"
+  local eta="${3:-}"
+  local percent="${percent_text//[^0-9.]/}"
+  local whole="${percent%%.*}"
+  local width=24
+  local filled empty bar=""
+  local i
 
-COOKIES=()
-if [[ "$1" == "-c" ]]; then
-  shift
-  BROWSER="safari"
-  if [[ -n "$1" && "$1" != http* && "$1" != -* ]]; then
-    BROWSER="$1"
-    shift
+  if [[ -z "$whole" ]]; then
+    whole=0
   fi
-  COOKIES=(--cookies-from-browser "$BROWSER")
-fi
+  if (( whole < 0 )); then
+    whole=0
+  elif (( whole > 100 )); then
+    whole=100
+  fi
+  if (( whole < PROGRESS_LAST_WHOLE )); then
+    whole=$PROGRESS_LAST_WHOLE
+  else
+    PROGRESS_LAST_WHOLE=$whole
+  fi
+
+  filled=$(( whole * width / 100 ))
+  empty=$(( width - filled ))
+
+  for (( i = 0; i < filled; i++ )); do
+    bar="${bar}#"
+  done
+  for (( i = 0; i < empty; i++ )); do
+    bar="${bar}-"
+  done
+
+  printf '\r\033[KDownload [%s] %3d%%' "$bar" "$whole"
+  if [[ -n "$speed" && "$speed" != "N/A" && "$speed" != "Unknown" ]]; then
+    printf '  %s' "$speed"
+  fi
+  if [[ -n "$eta" && "$eta" != "N/A" && "$eta" != "Unknown" ]]; then
+    printf '  ETA %s' "$eta"
+  fi
+}
+
+run_ytdlp() {
+  local URL="$1"
+  local DOWNLOAD_PATH_FILE="$2"
+  local LOG_FILE exit_code
+  local line percent speed eta
+  PROGRESS_LAST_WHOLE=0
+
+  if [ "$VERBOSE" -eq 1 ]; then
+    yt-dlp --user-agent="$UA" \
+      "${COOKIES[@]}" \
+      -f "$FORMAT" \
+      --xattrs \
+      --concurrent-fragments 6 \
+      --postprocessor-args "ffmpeg:-movflags faststart" \
+      --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
+      "$URL" "${EXTRA_ARGS[@]}"
+    return
+  fi
+
+  LOG_FILE=$(mktemp -t ydl-ytdlp.XXXXXX)
+
+  set +e
+  yt-dlp --user-agent="$UA" \
+    "${COOKIES[@]}" \
+    -f "$FORMAT" \
+    --xattrs \
+    --concurrent-fragments 6 \
+    --postprocessor-args "ffmpeg:-movflags faststart" \
+    --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
+    --quiet \
+    --progress \
+    --newline \
+    --progress-template 'download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s' \
+    "$URL" "${EXTRA_ARGS[@]}" 2>"$LOG_FILE" | while IFS= read -r line; do
+      if [[ "$line" == download:* ]]; then
+        line="${line#download:}"
+      fi
+
+      if [[ "$line" == *%*'|'* ]]; then
+        percent="${line%%|*}"
+        line="${line#*|}"
+        speed="${line%%|*}"
+        eta="${line#*|}"
+        render_progress "$percent" "$speed" "$eta"
+      elif [[ -n "$line" ]]; then
+        echo "$line"
+      fi
+    done
+  exit_code=$pipestatus[1]
+  set -e
+
+  printf '\n'
+  if [ "$exit_code" -ne 0 ]; then
+    echo "Error: yt-dlp failed."
+    if [ -s "$LOG_FILE" ]; then
+      cat "$LOG_FILE"
+    fi
+  fi
+
+  rm -f "$LOG_FILE"
+  return "$exit_code"
+}
+
+run_ffmpeg() {
+  local INPUT_FILE="$1"
+  local TEMP_FILE="$2"
+  shift 2
+  local LOG_FILE exit_code
+
+  if [ "$VERBOSE" -eq 1 ]; then
+    ffmpeg -i "$INPUT_FILE" -c:v libx264 "$@" -movflags faststart "$TEMP_FILE"
+    return
+  fi
+
+  LOG_FILE=$(mktemp -t ydl-ffmpeg.XXXXXX)
+  set +e
+  ffmpeg -i "$INPUT_FILE" -c:v libx264 "$@" -movflags faststart "$TEMP_FILE" > /dev/null 2>"$LOG_FILE"
+  exit_code=$?
+  set -e
+
+  if [ "$exit_code" -ne 0 ]; then
+    echo "Error: ffmpeg failed."
+    if [ -s "$LOG_FILE" ]; then
+      cat "$LOG_FILE"
+    fi
+  fi
+
+  rm -f "$LOG_FILE"
+  return "$exit_code"
+}
+
+VERBOSE=0
+COOKIES=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    -v|--verbose)
+      VERBOSE=1
+      shift
+      ;;
+    -c)
+      shift
+      BROWSER="safari"
+      if [[ -n "$1" && "$1" != http* && "$1" != -* ]]; then
+        BROWSER="$1"
+        shift
+      fi
+      COOKIES=(--cookies-from-browser "$BROWSER")
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 FROM_CLIPBOARD=0
 
@@ -105,14 +260,10 @@ download_one() {
 # --print-to-file: record the actual final path from this download run
   DOWNLOAD_PATH_FILE=$(mktemp -t ydl-path.XXXXXX)
 
-  yt-dlp --user-agent="$UA" \
-    "${COOKIES[@]}" \
-    -f "$FORMAT" \
-    --xattrs \
-    --concurrent-fragments 6 \
-    --postprocessor-args "ffmpeg:-movflags faststart" \
-    --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
-    "$URL" "${EXTRA_ARGS[@]}"
+  if ! run_ytdlp "$URL" "$DOWNLOAD_PATH_FILE"; then
+    rm -f "$DOWNLOAD_PATH_FILE"
+    exit 1
+  fi
 
 # Get actual downloaded filename from the download run above.
   INPUT_FILE=$(tail -n 1 "$DOWNLOAD_PATH_FILE")
@@ -164,7 +315,7 @@ download_one() {
     fi
 
     echo "Re-encoding $VIDEO_CODEC → H.264 in MP4 container..."
-    if ! ffmpeg -i "$INPUT_FILE" -c:v libx264 "${AUDIO_ARGS[@]}" -movflags faststart "$TEMP_FILE"; then
+    if ! run_ffmpeg "$INPUT_FILE" "$TEMP_FILE" "${AUDIO_ARGS[@]}"; then
       rm -f "$TEMP_FILE"
       exit 1
     fi
