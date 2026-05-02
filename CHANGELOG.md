@@ -31,3 +31,7 @@
 - Convert videos outside Apple-friendly H.264/H.265 to H.264 MP4 instead of
   only handling VP9.
 - Clarify supported URL schemes in help output.
+- Add a one-command installer that installs missing Homebrew dependencies and
+  places `ydl` in Homebrew's `bin` directory.
+- Refuse to run or install on non-macOS systems, since `ydl` relies on macOS
+  clipboard and media workflow behavior.

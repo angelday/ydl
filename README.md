@@ -4,6 +4,9 @@
 preference for Apple-friendly H.264/H.265 output. Videos outside that codec
 family are converted to H.264 MP4.
 
+`ydl` is macOS-only. It relies on macOS clipboard commands and media workflow
+defaults.
+
 ## Development
 
 The editable source lives in this repository:
@@ -38,7 +41,28 @@ cd manual-test
 
 ## Install
 
-Deploy the checked-out script to the command location:
+Install `ydl` and its Homebrew dependencies with one command:
+
+```sh
+/bin/zsh -c "$(curl -fsSL https://raw.githubusercontent.com/angelday/ydl/main/install.zsh)"
+```
+
+The installer checks for `yt-dlp`, `ffmpeg`, and `ffprobe`. Missing
+dependencies are installed with Homebrew. If Homebrew is not installed, the
+installer will ask you to install it from <https://brew.sh/> and run the command
+again. On non-macOS systems, the installer refuses to run.
+
+By default this installs `ydl` to Homebrew's `bin` directory, such as
+`/opt/homebrew/bin/ydl` or `/usr/local/bin/ydl`.
+
+To choose a different install directory:
+
+```sh
+YDL_BINDIR="$HOME/bin" /bin/zsh -c "$(curl -fsSL https://raw.githubusercontent.com/angelday/ydl/main/install.zsh)"
+```
+
+From a checked-out development copy, deploy the local script to the command
+location:
 
 ```sh
 make install
@@ -50,8 +74,8 @@ Compare the development copy with the installed copy:
 make diff-installed
 ```
 
-By default this installs to `/usr/local/bin/ydl`. Override `PREFIX`, `BINDIR`,
-or `BIN` if needed:
+By default `make install` installs to `/usr/local/bin/ydl`. Override `PREFIX`,
+`BINDIR`, or `BIN` if needed:
 
 ```sh
 make install BINDIR="$HOME/bin"

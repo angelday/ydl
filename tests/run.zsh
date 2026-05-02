@@ -207,6 +207,27 @@ test_invalid_url() {
   assert_contains "$output" "Input does not contain any valid URLs" "invalid URL explains failure"
 }
 
+test_non_macos_refuses_to_run() {
+  local tmp output exit_code
+  tmp=$(mktemp -d)
+
+  cat > "$tmp/uname" <<'STUB'
+#!/bin/zsh
+print -- "Linux"
+STUB
+  chmod +x "$tmp/uname"
+
+  set +e
+  output=$(PATH="$tmp:$PATH" "$BIN" -h 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 1 ]] || fail "non-macOS exits with status 1"
+  assert_contains "$output" "ydl only runs on macOS" "non-macOS explains platform requirement"
+  assert_not_contains "$output" "Usage: ydl" "non-macOS refuses before help"
+  rm -rf "$tmp"
+}
+
 test_h264_download_skips_conversion() {
   local output
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video")
@@ -556,6 +577,9 @@ pass "help output"
 
 test_invalid_url
 pass "invalid URL handling"
+
+test_non_macos_refuses_to_run
+pass "non-macOS refusal"
 
 with_tmp "h264 path" test_h264_download_skips_conversion
 with_tmp "verbose backend output" test_verbose_shows_backend_output
