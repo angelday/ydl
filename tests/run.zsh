@@ -72,10 +72,12 @@ if [[ -n "$print_file" ]]; then
   print -r -- "$outfile" > "$print_file"
 fi
 
-if [[ "$emit_progress" -eq 1 ]]; then
+if [[ "$emit_progress" -eq 1 && -z "$YDL_STUB_NO_PROGRESS" ]]; then
   print -r -- " 50.0%|1.0MiB/s|Unknown"
   print -r -- " 49.0%|1.0MiB/s|Unknown"
   print -r -- "100.0%|1.0MiB/s|00:00"
+elif [[ -n "$YDL_STUB_ALREADY_DOWNLOADED" ]]; then
+  print -r -- "[download] $outfile has already been downloaded"
 fi
 STUB
 
@@ -160,6 +162,15 @@ test_verbose_shows_backend_output() {
   assert_contains "$output" "No conversion needed." "verbose shows no-op conversion"
 }
 
+test_existing_download_is_reported() {
+  local output
+  output=$(YDL_STUB_ALREADY_DOWNLOADED=1 YDL_STUB_NO_PROGRESS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video")
+
+  assert_contains "$output" "Already downloaded." "existing download is reported"
+  assert_not_contains "$output" "Already downloaded:" "default existing download hides filename"
+  assert_not_contains "$output" "Download [########################] 100%" "existing download does not render fake progress"
+}
+
 test_vp9_download_converts_to_mp4() {
   local output
   output=$(YDL_STUB_EXT=webm YDL_STUB_VIDEO_CODEC=vp9 YDL_STUB_AUDIO_CODEC=opus "$BIN" "https://example.com/video")
@@ -242,6 +253,7 @@ pass "invalid URL handling"
 
 with_tmp "h264 path" test_h264_download_skips_conversion
 with_tmp "verbose backend output" test_verbose_shows_backend_output
+with_tmp "existing download report" test_existing_download_is_reported
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
 with_tmp "av1 conversion path" test_av1_download_converts_to_mp4
 with_tmp "existing output protection" test_conversion_refuses_existing_output

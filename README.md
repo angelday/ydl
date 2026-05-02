@@ -30,7 +30,7 @@ Use `manual-test/` as the ignored scratch directory for real downloads:
 
 ```sh
 cd manual-test
-../ydl "$(cat ../testdata/notes-multiple.txt)"
+../ydl "$(cat ../testdata/notes-x.txt)"
 ```
 
 ## Install

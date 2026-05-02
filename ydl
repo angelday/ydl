@@ -51,6 +51,7 @@ render_progress() {
   local width=24
   local filled empty bar=""
   local i
+  PROGRESS_RENDERED=1
 
   if [[ -z "$whole" ]]; then
     whole=0
@@ -80,7 +81,7 @@ render_progress() {
   if [[ -n "$speed" && "$speed" != "N/A" && "$speed" != "Unknown" ]]; then
     printf '  %s' "$speed"
   fi
-  if [[ -n "$eta" && "$eta" != "N/A" && "$eta" != "Unknown" ]]; then
+  if [[ -n "$eta" && "$eta" != "N/A" && "$eta" != "NA" && "$eta" != "Unknown" ]]; then
     printf '  ETA %s' "$eta"
   fi
 }
@@ -91,6 +92,8 @@ run_ytdlp() {
   local LOG_FILE exit_code
   local line percent speed eta
   PROGRESS_LAST_WHOLE=0
+  PROGRESS_RENDERED=0
+  PROGRESS_ALREADY_DOWNLOADED=0
 
   if [ "$VERBOSE" -eq 1 ]; then
     yt-dlp --user-agent="$UA" \
@@ -114,7 +117,6 @@ run_ytdlp() {
     --concurrent-fragments 6 \
     --postprocessor-args "ffmpeg:-movflags faststart" \
     --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
-    --quiet \
     --progress \
     --newline \
     --progress-template 'download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s' \
@@ -129,19 +131,27 @@ run_ytdlp() {
         speed="${line%%|*}"
         eta="${line#*|}"
         render_progress "$percent" "$speed" "$eta"
+      elif [[ "$line" == *"has already been downloaded"* ]]; then
+        PROGRESS_ALREADY_DOWNLOADED=1
       elif [[ -n "$line" ]]; then
-        echo "$line"
+        :
       fi
     done
   exit_code=$pipestatus[1]
   set -e
 
-  printf '\n'
   if [ "$exit_code" -ne 0 ]; then
+    if [ "$PROGRESS_RENDERED" -eq 1 ]; then
+      printf '\n'
+    fi
     echo "Error: yt-dlp failed."
     if [ -s "$LOG_FILE" ]; then
       cat "$LOG_FILE"
     fi
+  fi
+
+  if [ "$PROGRESS_RENDERED" -eq 1 ]; then
+    printf '\n'
   fi
 
   rm -f "$LOG_FILE"
@@ -277,6 +287,16 @@ download_one() {
   if [ ! -f "$INPUT_FILE" ]; then
     echo "Error: Downloaded file not found: $INPUT_FILE"
     exit 1
+  fi
+
+  if [[ "$PROGRESS_RENDERED" -eq 0 && "$PROGRESS_ALREADY_DOWNLOADED" -eq 1 ]]; then
+    if [ "$VERBOSE" -eq 1 ]; then
+      echo "Already downloaded: $INPUT_FILE"
+    else
+      echo "Already downloaded."
+    fi
+  elif [ "$PROGRESS_RENDERED" -eq 0 ]; then
+    echo "File ready: $INPUT_FILE"
   fi
 
 # Re-encode codecs that are less broadly compatible with Apple/QuickTime.
