@@ -11,12 +11,26 @@ looks_like_url() {
   [[ "$1" =~ '^(https?|ftp)://[^[:space:]]+$' ]]
 }
 
+extract_urls() {
+  local input="$1"
+  local url
+
+  print -r -- "$input" | grep -Eo '(https?|ftp)://[^[:space:]<>"'\'']+' | while IFS= read -r url; do
+    url="${url%%[.,;:!?]}"
+    while [[ "$url" == *')' || "$url" == *']' || "$url" == *'}' ]]; do
+      url="${url[1,-2]}"
+    done
+    print -r -- "$url"
+  done
+}
+
 if [[ "$1" == "--help" || "$1" == "-h" ]]; then
   echo "ydl $VERSION"
-  echo "Usage: ydl [-c [browser]] ['URL'] [extra yt-dlp args...]"
+  echo "Usage: ydl [-c [browser]] ['URL or text with URLs'] [extra yt-dlp args...]"
   echo ""
   echo "Downloads the best available video using yt-dlp, preferring H.264/H.265."
-  echo "If no URL is given, reads from clipboard."
+  echo "If no input is given, reads URLs from clipboard text."
+  echo "If input contains multiple URLs, downloads them one by one."
   echo "Non-H.264/H.265 videos are automatically re-encoded to H.264."
   echo ""
   echo "URL should be wrapped in quotes to avoid shell interpretation."
@@ -42,113 +56,139 @@ fi
 FROM_CLIPBOARD=0
 
 if [ -n "$1" ]; then
-  URL="$1"
+  INPUT_TEXT="$1"
   shift
   EXTRA_ARGS=("$@")
 else
-  URL=$(pbpaste)
+  INPUT_TEXT=$(pbpaste)
   EXTRA_ARGS=()
   FROM_CLIPBOARD=1
 fi
 
-if ! looks_like_url "$URL"; then
+URLS=("${(@f)$(extract_urls "$INPUT_TEXT")}")
+if [ "${#URLS[@]}" -eq 1 ] && [ -z "$URLS[1]" ]; then
+  URLS=()
+fi
+
+if [ "${#URLS[@]}" -eq 0 ]; then
   if [ "$FROM_CLIPBOARD" -eq 1 ]; then
-    echo "Error: Clipboard does not contain a valid URL."
-    echo "Tip: copy a full https:// link first, or pass the URL explicitly."
+    echo "Error: Clipboard does not contain any valid URLs."
+    echo "Tip: copy text containing full https:// links first, or pass input explicitly."
   else
-    echo "Error: Input does not look like a valid URL: $URL"
-    echo "Tip: pass the URL explicitly or copy a full https:// link first."
+    echo "Error: Input does not contain any valid URLs."
+    echo "Tip: pass a URL, or paste text containing full https:// links."
   fi
   echo "Run 'ydl -h' for help."
   exit 1
 fi
 
 if [ "$FROM_CLIPBOARD" -eq 1 ]; then
-  echo "Using URL from clipboard: $URL"
+  echo "Using ${#URLS[@]} URL(s) from clipboard."
 fi
 
 # Prefer H.264/H.265 video + M4A audio, fall back to best available
 FORMAT="(bestvideo[vcodec~='^((he|a)vc|h26[45])']+bestaudio[ext=m4a])/(bestvideo+bestaudio/best)"
 UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
+download_one() {
+  local URL="$1"
+  local INPUT_FILE VIDEO_CODEC AUDIO_CODEC OUTPUT_FILE TEMP_FILE
+  local DOWNLOAD_PATH_FILE
+  local AUDIO_ARGS
+
+  echo "Downloading: $URL"
+
 # Download
 # --xattrs: store metadata in macOS extended attributes
 # --concurrent-fragments: parallel fragment downloads
 # --postprocessor-args: streaming-friendly MP4 (faststart)
 # --print-to-file: record the actual final path from this download run
-DOWNLOAD_PATH_FILE=$(mktemp -t ydl-path.XXXXXX)
-trap 'rm -f "$DOWNLOAD_PATH_FILE"' EXIT
+  DOWNLOAD_PATH_FILE=$(mktemp -t ydl-path.XXXXXX)
 
-yt-dlp --user-agent="$UA" \
-  "${COOKIES[@]}" \
-  -f "$FORMAT" \
-  --xattrs \
-  --concurrent-fragments 6 \
-  --postprocessor-args "ffmpeg:-movflags faststart" \
-  --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
-  "$URL" "${EXTRA_ARGS[@]}"
+  yt-dlp --user-agent="$UA" \
+    "${COOKIES[@]}" \
+    -f "$FORMAT" \
+    --xattrs \
+    --concurrent-fragments 6 \
+    --postprocessor-args "ffmpeg:-movflags faststart" \
+    --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
+    "$URL" "${EXTRA_ARGS[@]}"
 
 # Get actual downloaded filename from the download run above.
-INPUT_FILE=$(tail -n 1 "$DOWNLOAD_PATH_FILE")
+  INPUT_FILE=$(tail -n 1 "$DOWNLOAD_PATH_FILE")
+  rm -f "$DOWNLOAD_PATH_FILE"
 
-if [ -z "$INPUT_FILE" ]; then
-  echo "Error: yt-dlp did not report a downloaded file path."
-  exit 1
-fi
+  if [ -z "$INPUT_FILE" ]; then
+    echo "Error: yt-dlp did not report a downloaded file path."
+    exit 1
+  fi
 
-if [ ! -f "$INPUT_FILE" ]; then
-  echo "Error: Downloaded file not found: $INPUT_FILE"
-  exit 1
-fi
+  if [ ! -f "$INPUT_FILE" ]; then
+    echo "Error: Downloaded file not found: $INPUT_FILE"
+    exit 1
+  fi
 
 # Re-encode codecs that are less broadly compatible with Apple/QuickTime.
-echo "Inspecting downloaded file: $INPUT_FILE"
-VIDEO_CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
-AUDIO_CODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
-echo "Detected video codec: $VIDEO_CODEC"
-if [ -n "$AUDIO_CODEC" ]; then
-  echo "Detected audio codec: $AUDIO_CODEC"
-fi
-
-if [[ "$VIDEO_CODEC" != "h264" && "$VIDEO_CODEC" != "hevc" && "$VIDEO_CODEC" != "h265" && "$VIDEO_CODEC" != "avc1" ]]; then
-  OUTPUT_FILE="${INPUT_FILE%.*}.mp4"
-  TEMP_FILE="${OUTPUT_FILE%.*}.ydl-tmp-$$.mp4"
-  AUDIO_ARGS=()
-
-  if [[ "$INPUT_FILE" != "$OUTPUT_FILE" && -e "$OUTPUT_FILE" ]]; then
-    echo "Error: Refusing to overwrite existing file: $OUTPUT_FILE"
-    exit 1
+  echo "Inspecting downloaded file: $INPUT_FILE"
+  VIDEO_CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
+  AUDIO_CODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
+  echo "Detected video codec: $VIDEO_CODEC"
+  if [ -n "$AUDIO_CODEC" ]; then
+    echo "Detected audio codec: $AUDIO_CODEC"
   fi
 
-  if [[ -e "$TEMP_FILE" ]]; then
-    echo "Error: Temporary output file already exists: $TEMP_FILE"
-    exit 1
-  fi
+  if [[ "$VIDEO_CODEC" != "h264" && "$VIDEO_CODEC" != "hevc" && "$VIDEO_CODEC" != "h265" && "$VIDEO_CODEC" != "avc1" ]]; then
+    OUTPUT_FILE="${INPUT_FILE%.*}.mp4"
+    TEMP_FILE="${OUTPUT_FILE%.*}.ydl-tmp-$$.mp4"
+    AUDIO_ARGS=()
 
-  if [ -z "$AUDIO_CODEC" ]; then
-    AUDIO_ARGS=(-an)
-    echo "No audio stream detected."
-  elif [ "$AUDIO_CODEC" = "aac" ]; then
-    AUDIO_ARGS=(-c:a copy)
-    echo "Audio is already AAC; copying audio stream."
+    if [[ "$INPUT_FILE" != "$OUTPUT_FILE" && -e "$OUTPUT_FILE" ]]; then
+      echo "Error: Refusing to overwrite existing file: $OUTPUT_FILE"
+      exit 1
+    fi
+
+    if [[ -e "$TEMP_FILE" ]]; then
+      echo "Error: Temporary output file already exists: $TEMP_FILE"
+      exit 1
+    fi
+
+    if [ -z "$AUDIO_CODEC" ]; then
+      AUDIO_ARGS=(-an)
+      echo "No audio stream detected."
+    elif [ "$AUDIO_CODEC" = "aac" ]; then
+      AUDIO_ARGS=(-c:a copy)
+      echo "Audio is already AAC; copying audio stream."
+    else
+      AUDIO_ARGS=(-c:a aac -b:a 192k)
+      echo "Re-encoding audio → AAC..."
+    fi
+
+    echo "Re-encoding $VIDEO_CODEC → H.264 in MP4 container..."
+    if ! ffmpeg -i "$INPUT_FILE" -c:v libx264 "${AUDIO_ARGS[@]}" -movflags faststart "$TEMP_FILE"; then
+      rm -f "$TEMP_FILE"
+      exit 1
+    fi
+
+    mv "$TEMP_FILE" "$OUTPUT_FILE"
+
+    if [ "$INPUT_FILE" != "$OUTPUT_FILE" ]; then
+      rm -f "$INPUT_FILE"
+    fi
+
+    echo "Conversion complete: $OUTPUT_FILE"
   else
-    AUDIO_ARGS=(-c:a aac -b:a 192k)
-    echo "Re-encoding audio → AAC..."
+    echo "No conversion needed."
   fi
+}
 
-  echo "Re-encoding $VIDEO_CODEC → H.264 in MP4 container..."
-  if ! ffmpeg -i "$INPUT_FILE" -c:v libx264 "${AUDIO_ARGS[@]}" -movflags faststart "$TEMP_FILE"; then
-    rm -f "$TEMP_FILE"
-    exit 1
-  fi
-
-  mv "$TEMP_FILE" "$OUTPUT_FILE"
-
-  if [ "$INPUT_FILE" != "$OUTPUT_FILE" ]; then
-    rm -f "$INPUT_FILE"
-  fi
-
-  echo "Conversion complete: $OUTPUT_FILE"
-else
-  echo "No conversion needed."
+if [ "${#URLS[@]}" -gt 1 ]; then
+  echo "Found ${#URLS[@]} URLs. Downloading one by one."
 fi
+
+for URL in "${URLS[@]}"; do
+  if ! looks_like_url "$URL"; then
+    echo "Skipping invalid URL: $URL"
+    continue
+  fi
+  download_one "$URL"
+done

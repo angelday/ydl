@@ -111,7 +111,7 @@ test_invalid_url() {
   set -e
 
   [[ "$exit_code" -eq 1 ]] || fail "invalid URL exits with status 1"
-  assert_contains "$output" "Input does not look like a valid URL" "invalid URL explains failure"
+  assert_contains "$output" "Input does not contain any valid URLs" "invalid URL explains failure"
 }
 
 test_h264_download_skips_conversion() {
@@ -156,6 +156,16 @@ test_conversion_refuses_existing_output() {
   assert_contains "$(cat download.mp4)" "existing mp4" "existing mp4 is preserved"
 }
 
+test_prose_with_multiple_urls_downloads_each() {
+  local input output
+  input=$'Some note text before https://example.com/one.\nThen another link: https://example.com/two?s=46) and trailing prose.'
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_contains "$output" "Found 2 URLs. Downloading one by one." "multi-url count reported"
+  assert_contains "$output" "Downloading: https://example.com/one" "first URL extracted from prose"
+  assert_contains "$output" "Downloading: https://example.com/two?s=46" "second URL strips closing punctuation"
+}
+
 test_help
 pass "help output"
 
@@ -166,5 +176,6 @@ with_tmp "h264 path" test_h264_download_skips_conversion
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
 with_tmp "av1 conversion path" test_av1_download_converts_to_mp4
 with_tmp "existing output protection" test_conversion_refuses_existing_output
+with_tmp "prose with multiple URLs" test_prose_with_multiple_urls_downloads_each
 
 print -- "$TEST_COUNT tests passed"

@@ -2,6 +2,8 @@
 
 ## 1.3.0 - Unreleased
 
+- Extract URLs from pasted text, so notes or prose containing multiple links can
+  be downloaded sequentially.
 - Capture the downloaded filepath from the original `yt-dlp` run instead of
   invoking `yt-dlp` a second time after download.
 - Refuse to overwrite an existing `.mp4` when converting a non-MP4 download.
