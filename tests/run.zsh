@@ -153,9 +153,9 @@ STUB
 set -e
 
 if [[ -n "$YDL_STUB_TWEET_UNAVAILABLE" ]]; then
-  print -r -- "{}"
+  print -r -- '"tweets":{"entities":{},"errors":{"12345":{}},"fetchStatus":{"12345":"failed"}}'
 else
-  print -r -- '{"id_str":"fake","text":"available tweet"}'
+  print -r -- '"tweets":{"entities":{"12345":{"bookmark_count":0,"id_str":"12345","extended_entities":{"media":[{"type":"photo"}]}}},"errors":{},"fetchStatus":{"12345":"loaded"}}'
 fi
 STUB
 
@@ -485,7 +485,7 @@ test_clipboard_rewrite_preserves_spacing() {
   print -r -- $'Title\n\nhttps://example.com/done\n\nNotes after\nhttps://example.com/also-done\n' > "$clipboard"
 
   output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN")
-  expected=$'Title\n\n\n\nNotes after'
+  expected=$'Title\n\n\nNotes after'
 
   assert_contains "$output" "Clipboard updated: removed 2 completed URLs." "completed clipboard update is reported"
   [[ "$(cat "$clipboard")" == "$expected" ]] || fail "clipboard rewrite preserves spacing"

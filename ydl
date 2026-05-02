@@ -218,7 +218,7 @@ run_ytdlp() {
 
 x_tweet_unavailable() {
   local url="$1"
-  local id response
+  local id page_url response
 
   if [[ "$url" != *"x.com/"* && "$url" != *"twitter.com/"* ]]; then
     return 1
@@ -228,8 +228,18 @@ x_tweet_unavailable() {
   fi
   id="$match[1]"
 
-  response=$(curl -fsL --max-time 5 "https://cdn.syndication.twimg.com/tweet-result?id=$id" 2>/dev/null || true)
-  [[ "$response" == "{}" ]]
+  page_url="https://x.com/i/status/$id"
+  response=$(curl -fsL --max-time 5 "$page_url" 2>/dev/null || true)
+
+  if [[ "$response" == *"\"$id\""* && ( "$response" == *"\"fetchStatus\":{\"$id\":\"loaded\""* || "$response" == *"\"$id\":{\"bookmark_count\""* ) ]]; then
+    return 1
+  fi
+
+  if [[ "$response" == *"\"fetchStatus\":{\"$id\":\"failed\""* || "$response" == *"\"tweets\":{\"entities\":{},\"errors\":{\"$id\""* ]]; then
+    return 0
+  fi
+
+  return 1
 }
 
 mark_no_video_url() {
@@ -261,18 +271,18 @@ remove_clipboard_url() {
   updated=$(YDL_REMOVE_URL="$url" perl -0pe '
     BEGIN { $url = $ENV{"YDL_REMOVE_URL"} }
     @lines = split /\n/, $_, -1;
+    @out = ();
     for (@lines) {
       if (index($_, $url) >= 0) {
         $line = $_;
         $line =~ s/\Q$url\E//g;
-        if ($line !~ m{https?://|ftp://}) {
-          $_ = "";
-        } else {
-          $_ = $line;
-        }
+        next if $line !~ m{\S};
+        push @out, $line;
+      } else {
+        push @out, $_;
       }
     }
-    $_ = join "\n", @lines;
+    $_ = join "\n", @out;
   ' <<< "$MARKED_INPUT_TEXT")
 
   if [[ "$updated" != "$MARKED_INPUT_TEXT" ]]; then
