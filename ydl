@@ -31,15 +31,20 @@ show_help() {
 
 extract_urls() {
   local input="$1"
-  local url
+  local skip_marked="${2:-1}"
 
-  print -r -- "$input" | grep -Eo '(https?|ftp)://[^[:space:]<>"'\'']+' | while IFS= read -r url; do
-    url="${url%%[.,;:!?]}"
-    while [[ "$url" == *')' || "$url" == *']' || "$url" == *'}' ]]; do
-      url="${url[1,-2]}"
-    done
-    print -r -- "$url"
-  done
+  print -r -- "$input" | env YDL_SKIP_MARKED="$skip_marked" perl -0ne '
+    BEGIN { $skip_marked = $ENV{"YDL_SKIP_MARKED"} }
+    while (m{(?:https?|ftp)://[^\s<>"'"'"']+}g) {
+      $url = $&;
+      $start = $-[0];
+      $prefix = substr($_, $start >= 10 ? $start - 10 : 0, $start >= 10 ? 10 : $start);
+      next if $skip_marked && $prefix eq "[no-video]";
+      $url =~ s/[.,;:!?]+$//;
+      $url =~ s/[\)\]\}]+$//;
+      print "$url\n";
+    }
+  '
 }
 
 render_progress() {
@@ -175,10 +180,16 @@ run_ytdlp() {
     if [ "$PROGRESS_RENDERED" -eq 1 ]; then
       printf '\n'
     fi
-    echo "Error: yt-dlp failed."
     if [ -s "$LOG_FILE" ]; then
       YDL_LAST_ERROR_LOG=$(cat "$LOG_FILE")
-      cat "$LOG_FILE"
+      if [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"no video"* ]]; then
+        echo "No video could be found in this tweet."
+      else
+        echo "Error: yt-dlp failed."
+        cat "$LOG_FILE"
+      fi
+    else
+      echo "Error: yt-dlp failed."
     fi
   fi
 
@@ -201,6 +212,35 @@ mark_no_video_url() {
   updated=$(YDL_MARK_URL="$url" perl -0pe '
     BEGIN { $url = $ENV{"YDL_MARK_URL"} }
     s/(?<!\[no-video\])\Q$url\E/[no-video]$url/g
+  ' <<< "$MARKED_INPUT_TEXT")
+
+  if [[ "$updated" != "$MARKED_INPUT_TEXT" ]]; then
+    MARKED_INPUT_TEXT="$updated"
+    CLIPBOARD_CHANGED=1
+    NO_VIDEO_MARKS=$((NO_VIDEO_MARKS + 1))
+  fi
+}
+
+remove_clipboard_url() {
+  local url="$1"
+  local updated
+
+  updated=$(YDL_REMOVE_URL="$url" perl -0pe '
+    BEGIN { $url = $ENV{"YDL_REMOVE_URL"} }
+    @lines = split /\n/, $_, -1;
+    for (@lines) {
+      if (index($_, $url) >= 0) {
+        $line = $_;
+        $line =~ s/\Q$url\E//g;
+        if ($line !~ m{https?://|ftp://}) {
+          $_ = "";
+        } else {
+          $_ = $line;
+        }
+      }
+    }
+    $_ = join "\n", grep { $_ ne "" } @lines;
+    $_ .= "\n" if $_ ne "";
   ' <<< "$MARKED_INPUT_TEXT")
 
   if [[ "$updated" != "$MARKED_INPUT_TEXT" ]]; then
@@ -282,14 +322,23 @@ else
 fi
 MARKED_INPUT_TEXT="$INPUT_TEXT"
 CLIPBOARD_CHANGED=0
+NO_VIDEO_MARKS=0
 
-URLS=("${(@f)$(extract_urls "$INPUT_TEXT")}")
+ALL_URLS=("${(@f)$(extract_urls "$INPUT_TEXT" 0)}")
+if [ "${#ALL_URLS[@]}" -eq 1 ] && [ -z "$ALL_URLS[1]" ]; then
+  ALL_URLS=()
+fi
+
+URLS=("${(@f)$(extract_urls "$INPUT_TEXT" 1)}")
 if [ "${#URLS[@]}" -eq 1 ] && [ -z "$URLS[1]" ]; then
   URLS=()
 fi
 
 if [ "${#URLS[@]}" -eq 0 ]; then
-  if [ "$FROM_CLIPBOARD" -eq 1 ]; then
+  if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 0 ]]; then
+    echo "No actionable URLs found."
+    exit 0
+  elif [ "$FROM_CLIPBOARD" -eq 1 ]; then
     echo "Error: Clipboard does not contain any valid URLs."
     echo "Tip: copy text containing full https:// links first, or pass input explicitly."
   else
@@ -426,19 +475,26 @@ for URL in "${URLS[@]}"; do
     if [[ "$FROM_CLIPBOARD" -eq 1 && "${(L)YDL_LAST_ERROR_LOG}" == *"no video"* ]]; then
       mark_no_video_url "$URL"
     fi
-    if [ "${#URLS[@]}" -gt 1 ]; then
-      echo "Continuing with next URL."
-    fi
+  elif [ "$FROM_CLIPBOARD" -eq 1 ]; then
+    remove_clipboard_url "$URL"
   fi
 done
 
 if [[ "$FROM_CLIPBOARD" -eq 1 && "$CLIPBOARD_CHANGED" -eq 1 ]]; then
   print -rn -- "$MARKED_INPUT_TEXT" | pbcopy
-  echo "Clipboard updated: marked unavailable video URLs with [no-video]."
+  if [[ "$NO_VIDEO_MARKS" -gt 0 ]]; then
+    if [[ "$NO_VIDEO_MARKS" -eq 1 ]]; then
+      echo "Clipboard updated: marked 1 unavailable video URL with [no-video]."
+    else
+      echo "Clipboard updated: marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]."
+    fi
+  else
+    echo "Clipboard updated: removed completed URLs."
+  fi
 fi
 
 if [ "$FAILURES" -gt 0 ]; then
-  if [ "${#URLS[@]}" -gt 1 ]; then
+  if [[ "${#URLS[@]}" -gt 1 && ! ( "$FROM_CLIPBOARD" -eq 1 && "$NO_VIDEO_MARKS" -eq "$FAILURES" ) ]]; then
     echo "Completed with $FAILURES failure(s)."
   fi
   exit 1

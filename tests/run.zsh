@@ -309,8 +309,9 @@ test_multi_url_continues_after_failure() {
 
   [[ "$exit_code" -eq 1 ]] || fail "multi-url failure exits with status 1"
   [[ -f download-2.mp4 ]] || fail "second URL still downloads after first failure"
-  assert_contains "$output" "No video could be found" "first failure is reported"
-  assert_contains "$output" "Continuing with next URL." "failure continuation is reported"
+  assert_contains "$output" "No video could be found in this tweet." "first failure is reported cleanly"
+  assert_not_contains "$output" "Error: yt-dlp failed." "known no-video failure hides backend error header"
+  assert_not_contains "$output" "Continuing with next URL." "failure continuation is implicit"
   assert_contains "$output" "Downloading: https://example.com/good" "second URL is attempted"
   assert_contains "$output" "Completed with 1 failure(s)." "failure summary is reported"
 }
@@ -326,10 +327,37 @@ test_clipboard_no_video_marks_url() {
   set -e
 
   [[ "$exit_code" -eq 1 ]] || fail "clipboard no-video exits with status 1"
-  assert_contains "$output" "Clipboard updated: marked unavailable video URLs with [no-video]." "clipboard update is reported"
+  assert_contains "$output" "Clipboard updated: marked 1 unavailable video URL with [no-video]." "clipboard update is reported"
   assert_contains "$(cat "$clipboard")" "[no-video]https://x.com/example/status/2049843950844834075?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "failed query URL is marked in clipboard"
-  assert_contains "$(cat "$clipboard")" "https://example.com/good" "successful URL remains in clipboard"
+  assert_not_contains "$(cat "$clipboard")" "https://example.com/good" "successful URL is removed from clipboard"
   assert_not_contains "$(cat "$clipboard")" "[no-video]https://example.com/good" "successful URL is not marked"
+  assert_not_contains "$output" "Completed with 1 failure(s)." "all-marked clipboard no-video failures do not print failure summary"
+}
+
+test_no_video_marker_is_not_retried() {
+  local input output exit_code
+  input=$'[no-video]https://example.com/no-video\nhttps://example.com/good'
+
+  output=$(YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_not_contains "$output" "Downloading: https://example.com/no-video" "marked no-video URL is skipped"
+  assert_contains "$output" "Downloading: https://example.com/good" "unmarked URL is still processed"
+}
+
+test_clipboard_only_marked_urls_is_done() {
+  local output exit_code clipboard
+  clipboard="$PWD/clipboard.txt"
+  print -r -- $'Plastik\n\n[no-video]https://example.com/one\n\n[no-video]https://example.com/two' > "$clipboard"
+
+  set +e
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" "$BIN" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 0 ]] || fail "clipboard with only marked URLs exits successfully"
+  assert_contains "$output" "No actionable URLs found." "only marked clipboard reports no actionable URLs"
+  assert_not_contains "$output" "Clipboard does not contain any valid URLs" "only marked clipboard is not treated as invalid"
+  assert_not_contains "$output" "Downloading:" "marked clipboard URLs are not downloaded"
 }
 
 test_help
@@ -352,5 +380,7 @@ with_tmp "sm note fixture" test_sm_note_fixture_extracts_urls
 with_tmp "unknown speed hidden" test_unknown_speed_is_hidden
 with_tmp "multi URL continues after failure" test_multi_url_continues_after_failure
 with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
+with_tmp "no-video marker is not retried" test_no_video_marker_is_not_retried
+with_tmp "clipboard only marked URLs" test_clipboard_only_marked_urls_is_done
 
 print -- "$TEST_COUNT tests passed"
