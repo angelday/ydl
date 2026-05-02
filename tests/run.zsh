@@ -323,6 +323,16 @@ test_sm_note_fixture_extracts_urls() {
   assert_contains "$output" "Downloading: https://www.instagram.com/reel/DWJwNGnjWi9/?igsh=MTFwMzVvZTUxb2Zvaw==" "sm instagram URL extracted"
 }
 
+test_real_url_fixture_extracts_urls() {
+  local input output
+  input=$(cat "$ROOT/testdata/urls.txt")
+  output=$(YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_contains "$output" "Found 2 URLs." "real URL fixture count reported"
+  assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "real x URL extracted"
+  assert_contains "$output" "Downloading: https://test-videos.co.uk/vids/bigbuckbunny/webm/vp9/1080/Big_Buck_Bunny_1080_10s_5MB.webm" "real webm URL extracted"
+}
+
 test_unknown_speed_is_hidden() {
   local output
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac YDL_STUB_UNKNOWN_SPEED=1 "$BIN" "https://example.com/video")
@@ -558,6 +568,7 @@ with_tmp "messy note fixture" test_messy_note_fixture_extracts_urls
 with_tmp "single note fixture" test_single_note_fixture_downloads_one
 with_tmp "x note fixture" test_x_note_fixture_extracts_urls
 with_tmp "sm note fixture" test_sm_note_fixture_extracts_urls
+with_tmp "real URL fixture" test_real_url_fixture_extracts_urls
 with_tmp "unknown speed hidden" test_unknown_speed_is_hidden
 with_tmp "unsupported URL clean output" test_unsupported_url_is_reported_cleanly
 with_tmp "verbose unsupported URL backend output" test_verbose_unsupported_url_shows_backend_output
