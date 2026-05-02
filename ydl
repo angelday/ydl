@@ -239,8 +239,7 @@ remove_clipboard_url() {
         }
       }
     }
-    $_ = join "\n", grep { $_ ne "" } @lines;
-    $_ .= "\n" if $_ ne "";
+    $_ = join "\n", @lines;
   ' <<< "$MARKED_INPUT_TEXT")
 
   if [[ "$updated" != "$MARKED_INPUT_TEXT" ]]; then
@@ -472,24 +471,26 @@ for URL in "${URLS[@]}"; do
   fi
   if ! download_one "$URL"; then
     FAILURES=$((FAILURES + 1))
-    if [[ "$FROM_CLIPBOARD" -eq 1 && "${(L)YDL_LAST_ERROR_LOG}" == *"no video"* ]]; then
+    if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 && "${(L)YDL_LAST_ERROR_LOG}" == *"no video"* ]]; then
       mark_no_video_url "$URL"
     fi
-  elif [ "$FROM_CLIPBOARD" -eq 1 ]; then
+  elif [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
     remove_clipboard_url "$URL"
   fi
 done
 
 if [[ "$FROM_CLIPBOARD" -eq 1 && "$CLIPBOARD_CHANGED" -eq 1 ]]; then
   print -rn -- "$MARKED_INPUT_TEXT" | pbcopy
-  if [[ "$NO_VIDEO_MARKS" -gt 0 ]]; then
-    if [[ "$NO_VIDEO_MARKS" -eq 1 ]]; then
-      echo "Clipboard updated: marked 1 unavailable video URL with [no-video]."
+  if [ "${#ALL_URLS[@]}" -gt 1 ]; then
+    if [[ "$NO_VIDEO_MARKS" -gt 0 ]]; then
+      if [[ "$NO_VIDEO_MARKS" -eq 1 ]]; then
+        echo "Clipboard updated: marked 1 unavailable video URL with [no-video]."
+      else
+        echo "Clipboard updated: marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]."
+      fi
     else
-      echo "Clipboard updated: marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]."
+      echo "Clipboard updated: removed completed URLs."
     fi
-  else
-    echo "Clipboard updated: removed completed URLs."
   fi
 fi
 

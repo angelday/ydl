@@ -360,6 +360,29 @@ test_clipboard_only_marked_urls_is_done() {
   assert_not_contains "$output" "Downloading:" "marked clipboard URLs are not downloaded"
 }
 
+test_clipboard_rewrite_preserves_spacing() {
+  local output clipboard expected
+  clipboard="$PWD/clipboard.txt"
+  print -r -- $'Title\n\nhttps://example.com/done\n\nNotes after\nhttps://example.com/also-done\n' > "$clipboard"
+
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN")
+  expected=$'Title\n\n\n\nNotes after'
+
+  assert_contains "$output" "Clipboard updated: removed completed URLs." "completed clipboard update is reported"
+  [[ "$(cat "$clipboard")" == "$expected" ]] || fail "clipboard rewrite preserves spacing"
+}
+
+test_single_clipboard_url_is_left_intact() {
+  local output clipboard
+  clipboard="$PWD/clipboard.txt"
+  print -r -- "https://example.com/done" > "$clipboard"
+
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN")
+
+  assert_not_contains "$output" "Clipboard updated:" "single clipboard URL does not report rewrite"
+  [[ "$(cat "$clipboard")" == "https://example.com/done" ]] || fail "single clipboard URL is left intact"
+}
+
 test_help
 pass "help output"
 
@@ -382,5 +405,7 @@ with_tmp "multi URL continues after failure" test_multi_url_continues_after_fail
 with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
 with_tmp "no-video marker is not retried" test_no_video_marker_is_not_retried
 with_tmp "clipboard only marked URLs" test_clipboard_only_marked_urls_is_done
+with_tmp "clipboard rewrite preserves spacing" test_clipboard_rewrite_preserves_spacing
+with_tmp "single clipboard URL is left intact" test_single_clipboard_url_is_left_intact
 
 print -- "$TEST_COUNT tests passed"

@@ -10,7 +10,9 @@
   available by rewriting the clipboard text with `[no-video]` before the URL,
   remove successfully completed URLs from the rewritten clipboard text, and
   skip previously marked `[no-video]` URLs on later runs. Clipboard input with
-  only marked URLs now exits cleanly with no work to do.
+  only marked URLs now exits cleanly with no work to do. Clipboard rewriting is
+  only applied to multi-URL clipboard queues; single-URL clipboards are left
+  intact.
 - Show a concise ASCII download progress bar by default, with `-v`/`--verbose`
   available for raw `yt-dlp` and `ffmpeg` output.
 - Preserve `yt-dlp`'s already-downloaded signal in default output, including
