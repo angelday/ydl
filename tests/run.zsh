@@ -91,7 +91,7 @@ if [[ -n "$YDL_STUB_UNSUPPORTED" ]]; then
   exit 1
 fi
 
-if [[ -n "$YDL_STUB_INSTAGRAM_UNAVAILABLE" && "$count" -eq 1 ]]; then
+if [[ -n "$YDL_STUB_INSTAGRAM_RETRY" && "$count" -eq 1 ]]; then
   print -u2 -- "WARNING: [Instagram] Bm__BEMDvCw: No csrf token set by Instagram API"
   print -u2 -- "ERROR: [Instagram] Bm__BEMDvCw: Instagram sent an empty media response."
   exit 1
@@ -133,6 +133,8 @@ if [[ " $* " == *" -select_streams v:0 "* ]]; then
   print -r -- "${YDL_STUB_VIDEO_CODEC:-h264}"
 elif [[ " $* " == *" -select_streams a:0 "* ]]; then
   print -r -- "${YDL_STUB_AUDIO_CODEC:-aac}"
+elif [[ " $* " == *" format=duration "* ]]; then
+  print -r -- "${YDL_STUB_DURATION:-10.0}"
 fi
 STUB
 
@@ -140,7 +142,20 @@ STUB
 #!/bin/zsh
 set -e
 
+emit_progress=0
+for arg in "$@"; do
+  if [[ "$arg" == "pipe:1" ]]; then
+    emit_progress=1
+  fi
+done
+
 out="${@[-1]}"
+if [[ "$emit_progress" -eq 1 ]]; then
+  print -r -- "out_time_us=5000000"
+  print -r -- "progress=continue"
+  print -r -- "out_time_us=10000000"
+  print -r -- "progress=end"
+fi
 print -r -- "stub conversion" > "$out"
 STUB
 
@@ -303,8 +318,23 @@ test_vp9_download_converts_to_mp4() {
 
   [[ -f download.mp4 ]] || fail "converted mp4 exists"
   [[ ! -f download.webm ]] || fail "source webm removed after conversion"
-  assert_contains "$output" "Re-encoding vp9 → H.264" "vp9 conversion starts"
-  assert_contains "$output" "Conversion complete:" "vp9 conversion completes"
+  assert_contains "$output" "Converting [############------------]  50%" "vp9 conversion progress starts"
+  assert_contains "$output" "Converting [########################] 100%" "vp9 conversion progress completes"
+  assert_not_contains "$output" "Converted." "default conversion does not print extra completion line"
+  assert_not_contains "$output" "Re-encoding vp9 → H.264" "default conversion hides codec detail"
+  assert_not_contains "$output" "Re-encoding audio → AAC" "default conversion hides audio detail"
+  assert_not_contains "$output" "$PWD/download.mp4" "default conversion hides full path"
+}
+
+test_verbose_conversion_shows_codec_details() {
+  local output
+  output=$(YDL_STUB_EXT=webm YDL_STUB_VIDEO_CODEC=vp9 YDL_STUB_AUDIO_CODEC=opus "$BIN" --verbose "https://example.com/video")
+
+  assert_contains "$output" "Detected video codec: vp9" "verbose conversion shows video codec"
+  assert_contains "$output" "Detected audio codec: opus" "verbose conversion shows audio codec"
+  assert_contains "$output" "Re-encoding audio → AAC..." "verbose conversion shows audio conversion"
+  assert_contains "$output" "Re-encoding vp9 → H.264 in MP4 container..." "verbose conversion shows video conversion"
+  assert_contains "$output" "Conversion complete: $PWD/download.mp4" "verbose conversion shows full output path"
 }
 
 test_av1_download_converts_to_mp4() {
@@ -313,7 +343,9 @@ test_av1_download_converts_to_mp4() {
 
   [[ -f download.mp4 ]] || fail "converted av1 mp4 exists"
   [[ ! -f download.mkv ]] || fail "source mkv removed after conversion"
-  assert_contains "$output" "Re-encoding av1 → H.264" "av1 conversion starts"
+  assert_contains "$output" "Converting [############------------]  50%" "av1 conversion progress starts"
+  assert_contains "$output" "Converting [########################] 100%" "av1 conversion progress completes"
+  assert_not_contains "$output" "Converted." "default av1 conversion does not print extra completion line"
 }
 
 test_existing_converted_output_is_reused() {
@@ -326,7 +358,8 @@ test_existing_converted_output_is_reused() {
   set -e
 
   [[ "$exit_code" -eq 0 ]] || fail "existing converted output exits successfully"
-  assert_contains "$output" "Already downloaded." "existing converted output is reported as already downloaded"
+  assert_contains "$output" "Already converted." "existing converted output is reported as already converted"
+  assert_not_contains "$output" "Already downloaded." "existing converted output does not use download wording"
   assert_contains "$(cat download.mp4)" "existing mp4" "existing mp4 is preserved"
   [[ ! -f download.webm ]] || fail "downloaded source is removed when converted output already exists"
 }
@@ -343,6 +376,7 @@ test_existing_converted_output_reports_once() {
   [[ "$exit_code" -eq 0 ]] || fail "existing converted already-downloaded output exits successfully"
   count=$(printf '%s\n' "$output" | grep -c '^Already downloaded\.$' || true)
   [[ "$count" -eq 1 ]] || fail "existing converted already-downloaded output reports once"
+  assert_not_contains "$output" "Already converted." "existing source already-downloaded output does not add converted wording"
 }
 
 test_prose_with_multiple_urls_downloads_each() {
@@ -486,18 +520,19 @@ test_unavailable_tweet_is_reported_cleanly() {
   assert_not_contains "$output" "No video could be found" "unavailable tweet is not mislabeled no-video"
 }
 
-test_unavailable_instagram_post_is_reported_cleanly() {
+test_instagram_retry_is_reported_cleanly() {
   local output exit_code
 
   set +e
-  output=$(YDL_STUB_INSTAGRAM_UNAVAILABLE=1 "$BIN" "https://www.instagram.com/p/BoFlubPFowe/" 2>&1)
+  output=$(YDL_STUB_INSTAGRAM_RETRY=1 "$BIN" "https://www.instagram.com/p/BoFlubPFowe/" 2>&1)
   exit_code=$?
   set -e
 
-  [[ "$exit_code" -eq 1 ]] || fail "unavailable Instagram post exits with status 1"
-  assert_contains "$output" "Instagram post unavailable." "unavailable Instagram post is reported cleanly"
-  assert_not_contains "$output" "No csrf token" "unavailable Instagram post hides csrf warning"
-  assert_not_contains "$output" "Error: yt-dlp failed." "unavailable Instagram post hides backend error header"
+  [[ "$exit_code" -eq 1 ]] || fail "retryable Instagram post exits with status 1"
+  assert_contains "$output" "Instagram could not be accessed. Try again, or use -c safari / -c chrome." "retryable Instagram post is reported cleanly"
+  assert_not_contains "$output" "Instagram post unavailable." "retryable Instagram post is not reported unavailable"
+  assert_not_contains "$output" "No csrf token" "retryable Instagram post hides csrf warning"
+  assert_not_contains "$output" "Error: yt-dlp failed." "retryable Instagram post hides backend error header"
 }
 
 test_clipboard_no_video_marks_url() {
@@ -558,23 +593,24 @@ test_clipboard_unavailable_tweet_is_removed() {
   assert_not_contains "$contents" "[no-video]" "unavailable tweet is not marked no-video"
 }
 
-test_clipboard_unavailable_instagram_post_is_removed() {
+test_clipboard_instagram_retry_is_left_for_retry() {
   local output exit_code clipboard contents
   clipboard="$PWD/clipboard.txt"
   print -r -- $'Watch these:\nhttps://www.instagram.com/p/BoFlubPFowe/?utm_source=ig_share_sheet\nhttps://example.com/good' > "$clipboard"
 
   set +e
-  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_INSTAGRAM_UNAVAILABLE=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" 2>&1)
+  output=$(YDL_STUB_CLIPBOARD_FILE="$clipboard" YDL_STUB_INSTAGRAM_RETRY=1 YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" 2>&1)
   exit_code=$?
   set -e
   contents=$(cat "$clipboard")
 
-  [[ "$exit_code" -eq 1 ]] || fail "clipboard unavailable Instagram post exits with status 1"
-  assert_contains "$output" "Instagram post unavailable." "unavailable Instagram post is reported in clipboard batch"
-  assert_contains "$output" "Clipboard updated: removed 1 completed URL, removed 1 unavailable URL." "clipboard update summarizes unavailable Instagram post"
-  assert_contains "$output" "Completed with 1 failure(s): 1 unavailable post." "final stat includes unavailable Instagram post"
-  assert_not_contains "$contents" "https://www.instagram.com/p/BoFlubPFowe/" "unavailable Instagram post is removed from clipboard"
-  assert_not_contains "$contents" "[no-video]" "unavailable Instagram post is not marked no-video"
+  [[ "$exit_code" -eq 1 ]] || fail "clipboard retryable Instagram post exits with status 1"
+  assert_contains "$output" "Instagram could not be accessed. Try again, or use -c safari / -c chrome." "retryable Instagram post is reported in clipboard batch"
+  assert_contains "$output" "Clipboard updated: removed 1 completed URL." "clipboard update only summarizes completed URL"
+  assert_contains "$output" "Completed with 1 failure(s): 1 retryable Instagram post." "final stat includes retryable Instagram post"
+  assert_contains "$contents" "https://www.instagram.com/p/BoFlubPFowe/" "retryable Instagram post is left in clipboard"
+  assert_not_contains "$contents" "[no-video]" "retryable Instagram post is not marked no-video"
+  assert_not_contains "$contents" "https://example.com/good" "successful URL is still removed from clipboard"
 }
 
 test_no_video_marker_is_not_retried() {
@@ -642,6 +678,7 @@ with_tmp "cookies from named browser forwarding" test_cookies_from_named_browser
 with_tmp "cookies default browser forwarding" test_cookies_default_to_safari
 with_tmp "existing download report" test_existing_download_is_reported
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
+with_tmp "verbose conversion details" test_verbose_conversion_shows_codec_details
 with_tmp "av1 conversion path" test_av1_download_converts_to_mp4
 with_tmp "existing converted output reuse" test_existing_converted_output_is_reused
 with_tmp "existing converted output single report" test_existing_converted_output_reports_once
@@ -657,11 +694,11 @@ with_tmp "verbose unsupported URL backend output" test_verbose_unsupported_url_s
 with_tmp "suspended account clean output" test_suspended_account_is_reported_cleanly
 with_tmp "multi URL continues after failure" test_multi_url_continues_after_failure
 with_tmp "unavailable tweet clean output" test_unavailable_tweet_is_reported_cleanly
-with_tmp "unavailable Instagram post clean output" test_unavailable_instagram_post_is_reported_cleanly
+with_tmp "Instagram retry clean output" test_instagram_retry_is_reported_cleanly
 with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
 with_tmp "clipboard suspended removal and stats" test_clipboard_suspended_is_removed_and_counted
 with_tmp "clipboard unavailable tweet removal" test_clipboard_unavailable_tweet_is_removed
-with_tmp "clipboard unavailable Instagram post removal" test_clipboard_unavailable_instagram_post_is_removed
+with_tmp "clipboard Instagram retry" test_clipboard_instagram_retry_is_left_for_retry
 with_tmp "no-video marker is not retried" test_no_video_marker_is_not_retried
 with_tmp "clipboard only marked URLs" test_clipboard_only_marked_urls_is_done
 with_tmp "clipboard rewrite preserves spacing" test_clipboard_rewrite_preserves_spacing

@@ -25,6 +25,8 @@
 - Distinguish missing/deleted X tweets from tweets that simply have no video;
   unavailable tweets are removed from multi-URL clipboard queues instead of
   being marked `[no-video]`.
+- Report Instagram empty-media/csrf failures as retryable Instagram access
+  failures, and leave those URLs in multi-URL clipboard queues.
 - Capture the downloaded filepath from the original `yt-dlp` run instead of
   invoking `yt-dlp` a second time after download.
 - Refuse to overwrite an existing `.mp4` when converting a non-MP4 download.
@@ -39,3 +41,7 @@
   update, and custom install directories.
 - Treat reruns of already-converted non-MP4 downloads as already downloaded
   instead of failing on the existing MP4.
+- Simplify default conversion output while keeping codec details in verbose
+  mode.
+- Show an ASCII progress bar during MP4 conversion when ffmpeg duration
+  progress is available.

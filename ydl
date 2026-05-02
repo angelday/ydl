@@ -104,6 +104,45 @@ render_progress() {
   fi
 }
 
+render_conversion_progress() {
+  local percent_text="$1"
+  local percent="${percent_text//[^0-9.]/}"
+  local whole="${percent%%.*}"
+  local width=24
+  local filled empty bar=""
+  local i
+  CONVERSION_RENDERED=1
+  if [[ -n "$CONVERSION_RENDERED_FILE" ]]; then
+    : > "$CONVERSION_RENDERED_FILE"
+  fi
+
+  if [[ -z "$whole" ]]; then
+    whole=0
+  fi
+  if (( whole < 0 )); then
+    whole=0
+  elif (( whole > 100 )); then
+    whole=100
+  fi
+  if (( whole < CONVERSION_LAST_WHOLE )); then
+    whole=$CONVERSION_LAST_WHOLE
+  else
+    CONVERSION_LAST_WHOLE=$whole
+  fi
+
+  filled=$(( whole * width / 100 ))
+  empty=$(( width - filled ))
+
+  for (( i = 0; i < filled; i++ )); do
+    bar="${bar}#"
+  done
+  for (( i = 0; i < empty; i++ )); do
+    bar="${bar}-"
+  done
+
+  printf '\r\033[KConverting [%s] %3d%%' "$bar" "$whole"
+}
+
 run_ytdlp() {
   local URL="$1"
   local DOWNLOAD_PATH_FILE="$2"
@@ -205,8 +244,8 @@ run_ytdlp() {
         YDL_LAST_FAILURE_KIND="suspended"
         echo "Account suspended."
       elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"[instagram]"* && ( "${(L)YDL_LAST_ERROR_LOG}" == *"empty media response"* || "${(L)YDL_LAST_ERROR_LOG}" == *"no csrf token set"* ) ]]; then
-        YDL_LAST_FAILURE_KIND="unavailable"
-        echo "Instagram post unavailable."
+        YDL_LAST_FAILURE_KIND="instagram-retry"
+        echo "Instagram could not be accessed. Try again, or use -c safari / -c chrome."
       elif [[ "$VERBOSE" -eq 0 && "${(L)YDL_LAST_ERROR_LOG}" == *"unsupported url"* ]]; then
         YDL_LAST_FAILURE_KIND="unsupported"
         echo "Unsupported URL."
@@ -309,8 +348,12 @@ remove_clipboard_url() {
 run_ffmpeg() {
   local INPUT_FILE="$1"
   local TEMP_FILE="$2"
-  shift 2
-  local LOG_FILE exit_code
+  local DURATION="$3"
+  shift 3
+  local LOG_FILE exit_code CONVERSION_RENDERED_FILE
+  local line out_time_us percent
+  CONVERSION_LAST_WHOLE=0
+  CONVERSION_RENDERED=0
 
   if [ "$VERBOSE" -eq 1 ]; then
     ffmpeg -i "$INPUT_FILE" -c:v libx264 "$@" -movflags faststart "$TEMP_FILE"
@@ -318,10 +361,41 @@ run_ffmpeg() {
   fi
 
   LOG_FILE=$(mktemp -t ydl-ffmpeg.XXXXXX)
-  set +e
-  ffmpeg -i "$INPUT_FILE" -c:v libx264 "$@" -movflags faststart "$TEMP_FILE" > /dev/null 2>"$LOG_FILE"
-  exit_code=$?
-  set -e
+  CONVERSION_RENDERED_FILE=$(mktemp -t ydl-conversion-rendered.XXXXXX)
+  rm -f "$CONVERSION_RENDERED_FILE"
+
+  if [[ "$DURATION" =~ '^[0-9]+([.][0-9]+)?$' ]] && awk -v duration="$DURATION" 'BEGIN { exit !(duration > 0) }'; then
+    set +e
+    ffmpeg -i "$INPUT_FILE" -c:v libx264 "$@" -movflags faststart -progress pipe:1 -nostats "$TEMP_FILE" 2>"$LOG_FILE" | while IFS= read -r line; do
+      if [[ "$line" == out_time_us=* || "$line" == out_time_ms=* ]]; then
+        out_time_us="${line#*=}"
+        percent=$(awk -v out_time_us="$out_time_us" -v duration="$DURATION" 'BEGIN {
+          percent = int(((out_time_us / 1000000) / duration) * 100)
+          if (percent < 0) percent = 0
+          if (percent > 100) percent = 100
+          print percent
+        }')
+        render_conversion_progress "$percent%"
+      elif [[ "$line" == "progress=end" ]]; then
+        render_conversion_progress "100%"
+      fi
+    done
+    exit_code=$pipestatus[1]
+    set -e
+    if [[ -e "$CONVERSION_RENDERED_FILE" ]]; then
+      CONVERSION_RENDERED=1
+    fi
+  else
+    echo "Converting to MP4..."
+    set +e
+    ffmpeg -i "$INPUT_FILE" -c:v libx264 "$@" -movflags faststart "$TEMP_FILE" > /dev/null 2>"$LOG_FILE"
+    exit_code=$?
+    set -e
+  fi
+
+  if [ "$CONVERSION_RENDERED" -eq 1 ]; then
+    printf '\n'
+  fi
 
   if [ "$exit_code" -ne 0 ]; then
     echo "Error: ffmpeg failed."
@@ -330,7 +404,7 @@ run_ffmpeg() {
     fi
   fi
 
-  rm -f "$LOG_FILE"
+  rm -f "$LOG_FILE" "$CONVERSION_RENDERED_FILE"
   return "$exit_code"
 }
 
@@ -385,6 +459,7 @@ SUSPENDED_REMOVES=0
 UNAVAILABLE_REMOVES=0
 SUSPENDED_FAILURES=0
 UNAVAILABLE_FAILURES=0
+INSTAGRAM_RETRY_FAILURES=0
 NO_VIDEO_FAILURES=0
 
 ALL_URLS=("${(@f)$(extract_urls "$INPUT_TEXT" 0)}")
@@ -418,7 +493,7 @@ UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML,
 
 download_one() {
   local URL="$1"
-  local INPUT_FILE VIDEO_CODEC AUDIO_CODEC OUTPUT_FILE TEMP_FILE
+  local INPUT_FILE VIDEO_CODEC AUDIO_CODEC DURATION OUTPUT_FILE TEMP_FILE
   local DOWNLOAD_PATH_FILE
   local AUDIO_ARGS
 
@@ -466,6 +541,7 @@ download_one() {
   fi
   VIDEO_CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
   AUDIO_CODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
+  DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE" 2>/dev/null || true)
   if [ "$VERBOSE" -eq 1 ]; then
     echo "Detected video codec: $VIDEO_CODEC"
   fi
@@ -484,7 +560,7 @@ download_one() {
         if [ "$VERBOSE" -eq 1 ]; then
           echo "Converted output already exists: $OUTPUT_FILE"
         else
-          echo "Already downloaded."
+          echo "Already converted."
         fi
       elif [ "$VERBOSE" -eq 1 ]; then
         echo "Converted output already exists: $OUTPUT_FILE"
@@ -499,17 +575,25 @@ download_one() {
 
     if [ -z "$AUDIO_CODEC" ]; then
       AUDIO_ARGS=(-an)
-      echo "No audio stream detected."
+      if [ "$VERBOSE" -eq 1 ]; then
+        echo "No audio stream detected."
+      fi
     elif [ "$AUDIO_CODEC" = "aac" ]; then
       AUDIO_ARGS=(-c:a copy)
-      echo "Audio is already AAC; copying audio stream."
+      if [ "$VERBOSE" -eq 1 ]; then
+        echo "Audio is already AAC; copying audio stream."
+      fi
     else
       AUDIO_ARGS=(-c:a aac -b:a 192k)
-      echo "Re-encoding audio → AAC..."
+      if [ "$VERBOSE" -eq 1 ]; then
+        echo "Re-encoding audio → AAC..."
+      fi
     fi
 
-    echo "Re-encoding $VIDEO_CODEC → H.264 in MP4 container..."
-    if ! run_ffmpeg "$INPUT_FILE" "$TEMP_FILE" "${AUDIO_ARGS[@]}"; then
+    if [ "$VERBOSE" -eq 1 ]; then
+      echo "Re-encoding $VIDEO_CODEC → H.264 in MP4 container..."
+    fi
+    if ! run_ffmpeg "$INPUT_FILE" "$TEMP_FILE" "$DURATION" "${AUDIO_ARGS[@]}"; then
       rm -f "$TEMP_FILE"
       return 1
     fi
@@ -520,7 +604,9 @@ download_one() {
       rm -f "$INPUT_FILE"
     fi
 
-    echo "Conversion complete: $OUTPUT_FILE"
+    if [ "$VERBOSE" -eq 1 ]; then
+      echo "Conversion complete: $OUTPUT_FILE"
+    fi
   else
     if [ "$VERBOSE" -eq 1 ]; then
       echo "No conversion needed."
@@ -564,6 +650,8 @@ for URL in "${URLS[@]}"; do
           SUSPENDED_REMOVES=$((SUSPENDED_REMOVES + 1))
         fi
       fi
+    elif [[ "$YDL_LAST_FAILURE_KIND" == "instagram-retry" ]]; then
+      INSTAGRAM_RETRY_FAILURES=$((INSTAGRAM_RETRY_FAILURES + 1))
     fi
   elif [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
     if remove_clipboard_url "$URL"; then
@@ -622,7 +710,12 @@ if [ "$FAILURES" -gt 0 ]; then
     elif [[ "$UNAVAILABLE_FAILURES" -gt 1 ]]; then
       FAILURE_PARTS+=("$UNAVAILABLE_FAILURES unavailable posts")
     fi
-    OTHER_FAILURES=$((FAILURES - SUSPENDED_FAILURES - NO_VIDEO_FAILURES - UNAVAILABLE_FAILURES))
+    if [[ "$INSTAGRAM_RETRY_FAILURES" -eq 1 ]]; then
+      FAILURE_PARTS+=("1 retryable Instagram post")
+    elif [[ "$INSTAGRAM_RETRY_FAILURES" -gt 1 ]]; then
+      FAILURE_PARTS+=("$INSTAGRAM_RETRY_FAILURES retryable Instagram posts")
+    fi
+    OTHER_FAILURES=$((FAILURES - SUSPENDED_FAILURES - NO_VIDEO_FAILURES - UNAVAILABLE_FAILURES - INSTAGRAM_RETRY_FAILURES))
     if [[ "$OTHER_FAILURES" -eq 1 ]]; then
       FAILURE_PARTS+=("1 other failure")
     elif [[ "$OTHER_FAILURES" -gt 1 ]]; then
