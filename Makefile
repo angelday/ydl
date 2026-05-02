@@ -14,6 +14,7 @@ help:
 
 test:
 	./tests/run.zsh
+	./tests/install.zsh
 
 install:
 	$(INSTALL) -m 755 ./ydl "$(BINDIR)/$(BIN)"

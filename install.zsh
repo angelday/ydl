@@ -24,9 +24,9 @@ missing=()
 need_command yt-dlp || missing+=(yt-dlp)
 need_command ffmpeg || missing+=(ffmpeg)
 need_command ffprobe || missing+=(ffmpeg)
+packages=("${(@u)missing}")
 
-if (( ${#missing[@]} > 0 )); then
-  packages=("${(@u)missing}")
+if (( ${#packages[@]} > 0 )); then
   print -- "Installing dependencies with Homebrew: ${(j: :)packages}"
   brew install "${packages[@]}"
 fi
@@ -44,11 +44,17 @@ if [[ ! -d "$BINDIR" ]]; then
   mkdir -p "$BINDIR"
 fi
 
+if [[ -e "$TARGET" ]]; then
+  print -- "Updating ydl at $TARGET..."
+else
+  print -- "Installing ydl to $TARGET..."
+fi
+
 if [[ -w "$BINDIR" ]]; then
   install -m 755 "$tmp" "$TARGET"
 else
   sudo install -m 755 "$tmp" "$TARGET"
 fi
 
-print -- "Installed ydl to $TARGET"
+print -- "ydl is ready at $TARGET"
 print -- "Run: ydl -h"

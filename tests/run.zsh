@@ -38,6 +38,10 @@ make_stubs() {
 #!/bin/zsh
 set -e
 
+if [[ -n "$YDL_STUB_ARGS_FILE" ]]; then
+  printf '%s\n' "$@" > "$YDL_STUB_ARGS_FILE"
+fi
+
 outfile="$PWD/download.${YDL_STUB_EXT:-webm}"
 counter_file="$PWD/.ydl-stub-count"
 print_file=""
@@ -246,6 +250,41 @@ test_verbose_shows_backend_output() {
   assert_contains "$output" "stub yt-dlp raw output" "verbose shows raw yt-dlp output"
   assert_contains "$output" "Detected video codec: h264" "verbose shows codec details"
   assert_contains "$output" "No conversion needed." "verbose shows no-op conversion"
+}
+
+test_extra_yt_dlp_args_are_forwarded() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video" --write-info-json --download-archive archive.txt >/dev/null
+  args=$(cat "$args_file")
+
+  assert_contains "$args" "--write-info-json" "extra yt-dlp flag is forwarded"
+  assert_contains "$args" "--download-archive" "extra yt-dlp option is forwarded"
+  assert_contains "$args" "archive.txt" "extra yt-dlp option value is forwarded"
+}
+
+test_cookies_from_named_browser_are_forwarded() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" -c chrome "https://example.com/video" >/dev/null
+  args=$(cat "$args_file")
+
+  assert_contains "$args" "--cookies-from-browser" "cookie option is forwarded"
+  assert_contains "$args" "chrome" "named browser is forwarded"
+}
+
+test_cookies_default_to_safari() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" -c "https://example.com/video" >/dev/null
+  args=$(cat "$args_file")
+
+  assert_contains "$args" "--cookies-from-browser" "default cookie option is forwarded"
+  assert_contains "$args" "safari" "cookie browser defaults to safari"
+  assert_contains "$args" "https://example.com/video" "URL is preserved when -c has no browser argument"
 }
 
 test_existing_download_is_reported() {
@@ -583,6 +622,9 @@ pass "non-macOS refusal"
 
 with_tmp "h264 path" test_h264_download_skips_conversion
 with_tmp "verbose backend output" test_verbose_shows_backend_output
+with_tmp "extra yt-dlp args forwarding" test_extra_yt_dlp_args_are_forwarded
+with_tmp "cookies from named browser forwarding" test_cookies_from_named_browser_are_forwarded
+with_tmp "cookies default browser forwarding" test_cookies_default_to_safari
 with_tmp "existing download report" test_existing_download_is_reported
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
 with_tmp "av1 conversion path" test_av1_download_converts_to_mp4
