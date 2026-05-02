@@ -238,7 +238,7 @@ if [ "${#URLS[@]}" -eq 0 ]; then
 fi
 
 if [ "$FROM_CLIPBOARD" -eq 1 ]; then
-  echo "Using ${#URLS[@]} URL(s) from clipboard."
+  echo "Found ${#URLS[@]} URL(s)."
 fi
 
 # Prefer H.264/H.265 video + M4A audio, fall back to best available
@@ -280,11 +280,15 @@ download_one() {
   fi
 
 # Re-encode codecs that are less broadly compatible with Apple/QuickTime.
-  echo "Inspecting downloaded file: $INPUT_FILE"
+  if [ "$VERBOSE" -eq 1 ]; then
+    echo "Inspecting downloaded file: $INPUT_FILE"
+  fi
   VIDEO_CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
   AUDIO_CODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$INPUT_FILE")
-  echo "Detected video codec: $VIDEO_CODEC"
-  if [ -n "$AUDIO_CODEC" ]; then
+  if [ "$VERBOSE" -eq 1 ]; then
+    echo "Detected video codec: $VIDEO_CODEC"
+  fi
+  if [[ "$VERBOSE" -eq 1 && -n "$AUDIO_CODEC" ]]; then
     echo "Detected audio codec: $AUDIO_CODEC"
   fi
 
@@ -328,12 +332,14 @@ download_one() {
 
     echo "Conversion complete: $OUTPUT_FILE"
   else
-    echo "No conversion needed."
+    if [ "$VERBOSE" -eq 1 ]; then
+      echo "No conversion needed."
+    fi
   fi
 }
 
 if [ "${#URLS[@]}" -gt 1 ]; then
-  echo "Found ${#URLS[@]} URLs. Downloading one by one."
+  echo "Found ${#URLS[@]} URLs."
 fi
 
 for URL in "${URLS[@]}"; do

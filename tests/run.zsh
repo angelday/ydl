@@ -23,6 +23,14 @@ assert_contains() {
   [[ "$haystack" == *"$needle"* ]] || fail "$label"
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+
+  [[ "$haystack" != *"$needle"* ]] || fail "$label"
+}
+
 make_stubs() {
   local dir="$1"
 
@@ -139,8 +147,8 @@ test_h264_download_skips_conversion() {
   [[ -f download.mp4 ]] || fail "downloaded file exists"
   assert_contains "$output" "Download [############------------]  50%" "download progress is rendered"
   assert_contains "$output" "Download [########################] 100%" "download progress reaches 100"
-  assert_contains "$output" "Detected video codec: h264" "h264 codec reported"
-  assert_contains "$output" "No conversion needed." "h264 skips conversion"
+  assert_not_contains "$output" "Detected video codec" "default output hides codec details"
+  assert_not_contains "$output" "No conversion needed." "default output hides no-op conversion"
 }
 
 test_verbose_shows_backend_output() {
@@ -148,6 +156,8 @@ test_verbose_shows_backend_output() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" --verbose "https://example.com/video")
 
   assert_contains "$output" "stub yt-dlp raw output" "verbose shows raw yt-dlp output"
+  assert_contains "$output" "Detected video codec: h264" "verbose shows codec details"
+  assert_contains "$output" "No conversion needed." "verbose shows no-op conversion"
 }
 
 test_vp9_download_converts_to_mp4() {
@@ -188,7 +198,7 @@ test_prose_with_multiple_urls_downloads_each() {
   input=$(cat "$ROOT/testdata/notes-multiple.txt")
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_contains "$output" "Found 3 URLs. Downloading one by one." "multi-url count reported"
+  assert_contains "$output" "Found 3 URLs." "multi-url count reported"
   assert_contains "$output" "Downloading: https://example.com/video/one" "first fixture URL extracted"
   assert_contains "$output" "Downloading: https://example.com/video/two?s=46" "second fixture URL strips trailing period"
   assert_contains "$output" "Downloading: https://example.com/video/three" "third fixture URL strips closing parenthesis"
@@ -199,7 +209,7 @@ test_messy_note_fixture_extracts_urls() {
   input=$(cat "$ROOT/testdata/notes-messy.txt")
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_contains "$output" "Found 4 URLs. Downloading one by one." "messy fixture count reported"
+  assert_contains "$output" "Found 4 URLs." "messy fixture count reported"
   assert_contains "$output" "Downloading: https://example.com/video/markdown" "markdown fixture URL extracted"
   assert_contains "$output" "Downloading: https://example.com/video/quoted" "quoted fixture URL extracted"
   assert_contains "$output" "Downloading: https://example.com/video/punctuation" "trailing punctuation stripped"
@@ -219,7 +229,7 @@ test_x_note_fixture_extracts_urls() {
   input=$(cat "$ROOT/testdata/notes-x.txt")
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_contains "$output" "Found 2 URLs. Downloading one by one." "x fixture count reported"
+  assert_contains "$output" "Found 2 URLs." "x fixture count reported"
   assert_contains "$output" "Downloading: https://x.com/antoinellorca/status/2049796325160423678/video/1?s=46" "first x URL extracted"
   assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "second x URL extracted"
 }
