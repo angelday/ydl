@@ -18,7 +18,7 @@ show_help() {
   echo "Downloads the best available video using yt-dlp, preferring H.264/H.265."
   echo "If no input is given, reads URLs from clipboard text."
   echo "If input contains multiple URLs, downloads them one by one."
-  echo "Non-H.264/H.265 videos are automatically re-encoded to H.264."
+  echo "Videos outside Apple-friendly H.264/H.265 are converted to H.264 MP4."
   echo ""
   echo "URL should be wrapped in quotes to avoid shell interpretation."
   echo "Accepted URL schemes: http, https, ftp."
@@ -52,6 +52,9 @@ render_progress() {
   local filled empty bar=""
   local i
   PROGRESS_RENDERED=1
+  if [[ -n "$PROGRESS_RENDERED_FILE" ]]; then
+    : > "$PROGRESS_RENDERED_FILE"
+  fi
 
   if [[ -z "$whole" ]]; then
     whole=0
@@ -78,7 +81,7 @@ render_progress() {
   done
 
   printf '\r\033[KDownload [%s] %3d%%' "$bar" "$whole"
-  if [[ -n "$speed" && "$speed" != "N/A" && "$speed" != "Unknown" ]]; then
+  if [[ -n "$speed" && "$speed" != "N/A" && "$speed" != "Unknown" && "$speed" != "Unknown B/s" ]]; then
     printf '  %s' "$speed"
   fi
   if [[ -n "$eta" && "$eta" != "N/A" && "$eta" != "NA" && "$eta" != "Unknown" ]]; then
@@ -90,6 +93,7 @@ run_ytdlp() {
   local URL="$1"
   local DOWNLOAD_PATH_FILE="$2"
   local LOG_FILE exit_code
+  local PROGRESS_RENDERED_FILE PROGRESS_ALREADY_DOWNLOADED_FILE
   local line percent speed eta
   YDL_LAST_ERROR_LOG=""
   PROGRESS_LAST_WHOLE=0
@@ -109,6 +113,9 @@ run_ytdlp() {
   fi
 
   LOG_FILE=$(mktemp -t ydl-ytdlp.XXXXXX)
+  PROGRESS_RENDERED_FILE=$(mktemp -t ydl-progress-rendered.XXXXXX)
+  PROGRESS_ALREADY_DOWNLOADED_FILE=$(mktemp -t ydl-progress-done.XXXXXX)
+  rm -f "$PROGRESS_RENDERED_FILE" "$PROGRESS_ALREADY_DOWNLOADED_FILE"
 
   set +e
   yt-dlp --user-agent="$UA" \
@@ -120,26 +127,49 @@ run_ytdlp() {
     --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
     --progress \
     --newline \
-    --progress-template 'download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s' \
     "$URL" "${EXTRA_ARGS[@]}" 2>"$LOG_FILE" | while IFS= read -r line; do
-      if [[ "$line" == download:* ]]; then
+      if [[ "$line" == *"has already been downloaded"* ]]; then
+        PROGRESS_ALREADY_DOWNLOADED=1
+        : > "$PROGRESS_ALREADY_DOWNLOADED_FILE"
+      elif [[ "$line" == download:* ]]; then
         line="${line#download:}"
-      fi
-
-      if [[ "$line" == *%*'|'* ]]; then
         percent="${line%%|*}"
         line="${line#*|}"
         speed="${line%%|*}"
         eta="${line#*|}"
-        render_progress "$percent" "$speed" "$eta"
-      elif [[ "$line" == *"has already been downloaded"* ]]; then
-        PROGRESS_ALREADY_DOWNLOADED=1
+        if [[ ! -e "$PROGRESS_ALREADY_DOWNLOADED_FILE" ]]; then
+          render_progress "$percent" "$speed" "$eta"
+        fi
+      elif [[ "$line" == "[download]"* && "$line" == *%* ]]; then
+        percent=""
+        speed=""
+        eta=""
+
+        if [[ "$line" =~ '([0-9]+(\.[0-9]+)?)%' ]]; then
+          percent="$match[1]%"
+        fi
+        if [[ "$line" =~ ' at +([^ ]+/s)' ]]; then
+          speed="$match[1]"
+        fi
+        if [[ "$line" =~ ' ETA +([^ ]+)' ]]; then
+          eta="$match[1]"
+        fi
+
+        if [[ -n "$percent" && ! -e "$PROGRESS_ALREADY_DOWNLOADED_FILE" ]]; then
+          render_progress "$percent" "$speed" "$eta"
+        fi
       elif [[ -n "$line" ]]; then
         :
       fi
     done
   exit_code=$pipestatus[1]
   set -e
+  if [[ -e "$PROGRESS_RENDERED_FILE" ]]; then
+    PROGRESS_RENDERED=1
+  fi
+  if [[ -e "$PROGRESS_ALREADY_DOWNLOADED_FILE" ]]; then
+    PROGRESS_ALREADY_DOWNLOADED=1
+  fi
 
   if [ "$exit_code" -ne 0 ]; then
     if [ "$PROGRESS_RENDERED" -eq 1 ]; then
@@ -156,7 +186,7 @@ run_ytdlp() {
     printf '\n'
   fi
 
-  rm -f "$LOG_FILE"
+  rm -f "$LOG_FILE" "$PROGRESS_RENDERED_FILE" "$PROGRESS_ALREADY_DOWNLOADED_FILE"
   return "$exit_code"
 }
 
@@ -314,7 +344,7 @@ download_one() {
     else
       echo "Already downloaded."
     fi
-  elif [ "$PROGRESS_RENDERED" -eq 0 ]; then
+  elif [[ "$PROGRESS_RENDERED" -eq 0 && "$VERBOSE" -eq 0 ]]; then
     echo "File ready: $INPUT_FILE"
   fi
 
@@ -404,7 +434,7 @@ done
 
 if [[ "$FROM_CLIPBOARD" -eq 1 && "$CLIPBOARD_CHANGED" -eq 1 ]]; then
   print -rn -- "$MARKED_INPUT_TEXT" | pbcopy
-  echo "Clipboard updated with [no-video] marker(s)."
+  echo "Clipboard updated: marked unavailable video URLs with [no-video]."
 fi
 
 if [ "$FAILURES" -gt 0 ]; then

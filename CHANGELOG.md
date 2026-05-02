@@ -4,13 +4,17 @@
 
 - Extract URLs from pasted text, so notes or prose containing multiple links can
   be downloaded sequentially.
+- Continue processing later URLs when one URL fails, then exit nonzero with a
+  failure summary.
 - When running from clipboard input, mark URLs that fail because no video is
   available by rewriting the clipboard text with `[no-video]` before the URL.
 - Show a concise ASCII download progress bar by default, with `-v`/`--verbose`
   available for raw `yt-dlp` and `ffmpeg` output.
+- Preserve `yt-dlp`'s already-downloaded signal in default output, including
+  cases where `yt-dlp` also emits a trailing `100%` line.
 - Capture the downloaded filepath from the original `yt-dlp` run instead of
   invoking `yt-dlp` a second time after download.
 - Refuse to overwrite an existing `.mp4` when converting a non-MP4 download.
-- Re-encode any non-H.264/H.265 video codec to H.264 instead of only handling
-  VP9.
+- Convert videos outside Apple-friendly H.264/H.265 to H.264 MP4 instead of
+  only handling VP9.
 - Clarify supported URL schemes in help output.

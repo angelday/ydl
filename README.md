@@ -1,7 +1,8 @@
 # ydl
 
 `ydl` is a small zsh wrapper around `yt-dlp` for downloading video with a
-preference for H.264/H.265 output, plus VP9-to-H.264 conversion when needed.
+preference for Apple-friendly H.264/H.265 output. Videos outside that codec
+family are converted to H.264 MP4.
 
 ## Development
 
@@ -15,8 +16,9 @@ make test
 The tests use temporary stub versions of `yt-dlp`, `ffprobe`, and `ffmpeg`, so
 they do not download anything and do not need network access.
 
-Put larger local fixtures or manual-download samples in `testdata/`. The
-directory is ignored by git except for its `.gitkeep`.
+Put reusable input fixtures in `testdata/`. Real downloaded files and other
+manual scratch output belong in `manual-test/`, which is ignored by git except
+for its `.gitkeep`.
 
 Reusable pasted-note fixtures live in `testdata/`:
 
@@ -24,6 +26,7 @@ Reusable pasted-note fixtures live in `testdata/`:
 - `notes-multiple.txt`
 - `notes-messy.txt`
 - `notes-x.txt`
+- `notes-sm.txt`
 - `urls.txt`
 
 Use `manual-test/` as the ignored scratch directory for real downloads:

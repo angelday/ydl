@@ -43,7 +43,6 @@ counter_file="$PWD/.ydl-stub-count"
 print_file=""
 next_is_print_template=0
 next_is_print_file=0
-next_is_progress_template=0
 emit_progress=0
 
 for arg in "$@"; do
@@ -55,11 +54,8 @@ for arg in "$@"; do
     next_is_print_file=1
   elif [[ "$arg" == "--print-to-file" ]]; then
     next_is_print_template=1
-  elif [[ "$next_is_progress_template" -eq 1 ]]; then
+  elif [[ "$arg" == "--progress" ]]; then
     emit_progress=1
-    next_is_progress_template=0
-  elif [[ "$arg" == "--progress-template" ]]; then
-    next_is_progress_template=1
   fi
 done
 
@@ -90,11 +86,16 @@ if [[ -n "$print_file" ]]; then
 fi
 
 if [[ "$emit_progress" -eq 1 && -z "$YDL_STUB_NO_PROGRESS" ]]; then
-  print -r -- " 50.0%|1.0MiB/s|Unknown"
-  print -r -- " 49.0%|1.0MiB/s|Unknown"
-  print -r -- "100.0%|1.0MiB/s|00:00"
+  if [[ -n "$YDL_STUB_UNKNOWN_SPEED" ]]; then
+    print -r -- "[download] 100.0% of 14.96MiB at Unknown B/s ETA NA"
+  else
+    print -r -- "[download]  50.0% of 14.96MiB at 1.0MiB/s ETA Unknown"
+    print -r -- "[download]  49.0% of 14.96MiB at 1.0MiB/s ETA Unknown"
+    print -r -- "[download] 100.0% of 14.96MiB at 1.0MiB/s ETA 00:00"
+  fi
 elif [[ -n "$YDL_STUB_ALREADY_DOWNLOADED" ]]; then
   print -r -- "[download] $outfile has already been downloaded"
+  print -r -- "[download] 100% of 14.96MiB"
 fi
 STUB
 
@@ -199,6 +200,7 @@ test_existing_download_is_reported() {
 
   assert_contains "$output" "Already downloaded." "existing download is reported"
   assert_not_contains "$output" "Already downloaded:" "default existing download hides filename"
+  assert_not_contains "$output" "Download [" "existing download ignores trailing yt-dlp 100 percent line"
   assert_not_contains "$output" "Download [########################] 100%" "existing download does not render fake progress"
 }
 
@@ -276,6 +278,26 @@ test_x_note_fixture_extracts_urls() {
   assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "second x URL extracted"
 }
 
+test_sm_note_fixture_extracts_urls() {
+  local input output
+  input=$(cat "$ROOT/testdata/notes-sm.txt")
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
+
+  assert_contains "$output" "Found 4 URLs." "sm fixture count reported"
+  assert_contains "$output" "Downloading: https://x.com/emtbrides/status/2034623934700679397?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm navy seal URL extracted"
+  assert_contains "$output" "Downloading: https://x.com/pbakaus/status/2034410464424382824?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm radiant shaders URL extracted"
+  assert_contains "$output" "Downloading: https://x.com/steveschoger/status/2035077141050622173?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm claude design URL extracted"
+  assert_contains "$output" "Downloading: https://www.instagram.com/reel/DWJwNGnjWi9/?igsh=MTFwMzVvZTUxb2Zvaw==" "sm instagram URL extracted"
+}
+
+test_unknown_speed_is_hidden() {
+  local output
+  output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac YDL_STUB_UNKNOWN_SPEED=1 "$BIN" "https://example.com/video")
+
+  assert_contains "$output" "Download [########################] 100%" "unknown-speed progress reaches 100"
+  assert_not_contains "$output" "Unknown B/s" "unknown speed is hidden"
+}
+
 test_multi_url_continues_after_failure() {
   local input output exit_code
   input=$'https://example.com/bad\nhttps://example.com/good'
@@ -304,7 +326,7 @@ test_clipboard_no_video_marks_url() {
   set -e
 
   [[ "$exit_code" -eq 1 ]] || fail "clipboard no-video exits with status 1"
-  assert_contains "$output" "Clipboard updated with [no-video] marker(s)." "clipboard update is reported"
+  assert_contains "$output" "Clipboard updated: marked unavailable video URLs with [no-video]." "clipboard update is reported"
   assert_contains "$(cat "$clipboard")" "[no-video]https://x.com/example/status/2049843950844834075?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "failed query URL is marked in clipboard"
   assert_contains "$(cat "$clipboard")" "https://example.com/good" "successful URL remains in clipboard"
   assert_not_contains "$(cat "$clipboard")" "[no-video]https://example.com/good" "successful URL is not marked"
@@ -326,6 +348,8 @@ with_tmp "prose with multiple URLs" test_prose_with_multiple_urls_downloads_each
 with_tmp "messy note fixture" test_messy_note_fixture_extracts_urls
 with_tmp "single note fixture" test_single_note_fixture_downloads_one
 with_tmp "x note fixture" test_x_note_fixture_extracts_urls
+with_tmp "sm note fixture" test_sm_note_fixture_extracts_urls
+with_tmp "unknown speed hidden" test_unknown_speed_is_hidden
 with_tmp "multi URL continues after failure" test_multi_url_continues_after_failure
 with_tmp "clipboard no-video marker" test_clipboard_no_video_marks_url
 
