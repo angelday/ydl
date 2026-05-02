@@ -316,7 +316,7 @@ test_av1_download_converts_to_mp4() {
   assert_contains "$output" "Re-encoding av1 → H.264" "av1 conversion starts"
 }
 
-test_conversion_refuses_existing_output() {
+test_existing_converted_output_is_reused() {
   local output exit_code
   print -r -- "existing mp4" > download.mp4
 
@@ -325,9 +325,24 @@ test_conversion_refuses_existing_output() {
   exit_code=$?
   set -e
 
-  [[ "$exit_code" -eq 1 ]] || fail "existing output exits with status 1"
-  assert_contains "$output" "Refusing to overwrite existing file" "existing output explains failure"
+  [[ "$exit_code" -eq 0 ]] || fail "existing converted output exits successfully"
+  assert_contains "$output" "Already downloaded." "existing converted output is reported as already downloaded"
   assert_contains "$(cat download.mp4)" "existing mp4" "existing mp4 is preserved"
+  [[ ! -f download.webm ]] || fail "downloaded source is removed when converted output already exists"
+}
+
+test_existing_converted_output_reports_once() {
+  local output exit_code count
+  print -r -- "existing mp4" > download.mp4
+
+  set +e
+  output=$(YDL_STUB_ALREADY_DOWNLOADED=1 YDL_STUB_NO_PROGRESS=1 YDL_STUB_EXT=webm YDL_STUB_VIDEO_CODEC=vp9 YDL_STUB_AUDIO_CODEC=opus "$BIN" "https://example.com/video" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 0 ]] || fail "existing converted already-downloaded output exits successfully"
+  count=$(printf '%s\n' "$output" | grep -c '^Already downloaded\.$' || true)
+  [[ "$count" -eq 1 ]] || fail "existing converted already-downloaded output reports once"
 }
 
 test_prose_with_multiple_urls_downloads_each() {
@@ -628,7 +643,8 @@ with_tmp "cookies default browser forwarding" test_cookies_default_to_safari
 with_tmp "existing download report" test_existing_download_is_reported
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
 with_tmp "av1 conversion path" test_av1_download_converts_to_mp4
-with_tmp "existing output protection" test_conversion_refuses_existing_output
+with_tmp "existing converted output reuse" test_existing_converted_output_is_reused
+with_tmp "existing converted output single report" test_existing_converted_output_reports_once
 with_tmp "prose with multiple URLs" test_prose_with_multiple_urls_downloads_each
 with_tmp "messy note fixture" test_messy_note_fixture_extracts_urls
 with_tmp "single note fixture" test_single_note_fixture_downloads_one

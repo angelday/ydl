@@ -479,8 +479,17 @@ download_one() {
     AUDIO_ARGS=()
 
     if [[ "$INPUT_FILE" != "$OUTPUT_FILE" && -e "$OUTPUT_FILE" ]]; then
-      echo "Error: Refusing to overwrite existing file: $OUTPUT_FILE"
-      return 1
+      if [[ "$PROGRESS_ALREADY_DOWNLOADED" -eq 0 ]]; then
+        rm -f "$INPUT_FILE"
+        if [ "$VERBOSE" -eq 1 ]; then
+          echo "Converted output already exists: $OUTPUT_FILE"
+        else
+          echo "Already downloaded."
+        fi
+      elif [ "$VERBOSE" -eq 1 ]; then
+        echo "Converted output already exists: $OUTPUT_FILE"
+      fi
+      return 0
     fi
 
     if [[ -e "$TEMP_FILE" ]]; then

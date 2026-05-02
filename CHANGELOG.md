@@ -37,3 +37,5 @@
   clipboard and media workflow behavior.
 - Add stubbed installer tests for Homebrew/dependency checks, first install,
   update, and custom install directories.
+- Treat reruns of already-converted non-MP4 downloads as already downloaded
+  instead of failing on the existing MP4.
