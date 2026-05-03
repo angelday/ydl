@@ -4,8 +4,38 @@
 preference for Apple-friendly H.264/H.265 output. Videos outside that codec
 family are converted to H.264 MP4.
 
-`ydl` is macOS-only. It relies on macOS clipboard commands and media workflow
-defaults.
+`ydl` is built for a macOS workflow, with Apple-friendly video output and
+clipboard behavior.
+
+## Usage
+
+Download a URL:
+
+```sh
+ydl "https://example.com/video"
+```
+
+Download URLs from pasted clipboard text:
+
+```sh
+ydl
+```
+
+Use browser cookies when a site needs them:
+
+```sh
+ydl -c "https://www.instagram.com/reel/..."
+ydl -c safari "https://www.instagram.com/reel/..."
+ydl -c chrome "https://www.instagram.com/reel/..."
+```
+
+`-c` defaults to Safari.
+
+Show backend output:
+
+```sh
+ydl -v "https://example.com/video"
+```
 
 ## Development
 
@@ -40,7 +70,7 @@ cd manual-test
 ../ydl "$(cat ../testdata/notes-x.txt)"
 ```
 
-## Install Or Update
+## Install or Update
 
 Install or update `ydl` and its Homebrew dependencies with one command:
 

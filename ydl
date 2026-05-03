@@ -345,6 +345,34 @@ remove_clipboard_url() {
   return 1
 }
 
+is_multi_clipboard() {
+  [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]
+}
+
+add_update_part() {
+  local count="$1"
+  local singular="$2"
+  local plural="$3"
+
+  if [[ "$count" -eq 1 ]]; then
+    UPDATE_PARTS+=("$singular")
+  elif [[ "$count" -gt 1 ]]; then
+    UPDATE_PARTS+=("$plural")
+  fi
+}
+
+add_failure_part() {
+  local count="$1"
+  local singular="$2"
+  local plural="$3"
+
+  if [[ "$count" -eq 1 ]]; then
+    FAILURE_PARTS+=("1 $singular")
+  elif [[ "$count" -gt 1 ]]; then
+    FAILURE_PARTS+=("$count $plural")
+  fi
+}
+
 run_ffmpeg() {
   local INPUT_FILE="$1"
   local TEMP_FILE="$2"
@@ -625,37 +653,37 @@ FAILURES=0
 for URL in "${URLS[@]}"; do
   if ! looks_like_url "$URL"; then
     echo "Skipping invalid URL: $URL"
-    FAILURES=$((FAILURES + 1))
+    (( FAILURES += 1 ))
     continue
   fi
   if ! download_one "$URL"; then
-    FAILURES=$((FAILURES + 1))
+    (( FAILURES += 1 ))
     LOWER_ERROR_LOG="${(L)YDL_LAST_ERROR_LOG}"
     if [[ "$YDL_LAST_FAILURE_KIND" == "no-video" || ( -z "$YDL_LAST_FAILURE_KIND" && "$LOWER_ERROR_LOG" == *"no video"* ) ]]; then
-      NO_VIDEO_FAILURES=$((NO_VIDEO_FAILURES + 1))
-      if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+      (( NO_VIDEO_FAILURES += 1 ))
+      if is_multi_clipboard; then
         mark_no_video_url "$URL" || true
       fi
     elif [[ "$YDL_LAST_FAILURE_KIND" == "unavailable" ]]; then
-      UNAVAILABLE_FAILURES=$((UNAVAILABLE_FAILURES + 1))
-      if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+      (( UNAVAILABLE_FAILURES += 1 ))
+      if is_multi_clipboard; then
         if remove_clipboard_url "$URL"; then
-          UNAVAILABLE_REMOVES=$((UNAVAILABLE_REMOVES + 1))
+          (( UNAVAILABLE_REMOVES += 1 ))
         fi
       fi
     elif [[ "$YDL_LAST_FAILURE_KIND" == "suspended" || ( -z "$YDL_LAST_FAILURE_KIND" && "$LOWER_ERROR_LOG" == *"suspended"* ) ]]; then
-      SUSPENDED_FAILURES=$((SUSPENDED_FAILURES + 1))
-      if [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+      (( SUSPENDED_FAILURES += 1 ))
+      if is_multi_clipboard; then
         if remove_clipboard_url "$URL"; then
-          SUSPENDED_REMOVES=$((SUSPENDED_REMOVES + 1))
+          (( SUSPENDED_REMOVES += 1 ))
         fi
       fi
     elif [[ "$YDL_LAST_FAILURE_KIND" == "instagram-retry" ]]; then
-      INSTAGRAM_RETRY_FAILURES=$((INSTAGRAM_RETRY_FAILURES + 1))
+      (( INSTAGRAM_RETRY_FAILURES += 1 ))
     fi
-  elif [[ "$FROM_CLIPBOARD" -eq 1 && "${#ALL_URLS[@]}" -gt 1 ]]; then
+  elif is_multi_clipboard; then
     if remove_clipboard_url "$URL"; then
-      COMPLETED_REMOVES=$((COMPLETED_REMOVES + 1))
+      (( COMPLETED_REMOVES += 1 ))
     fi
   fi
 done
@@ -663,31 +691,14 @@ done
 if [[ "$FROM_CLIPBOARD" -eq 1 && "$CLIPBOARD_CHANGED" -eq 1 ]]; then
   print -rn -- "$MARKED_INPUT_TEXT" | pbcopy
   if [ "${#ALL_URLS[@]}" -gt 1 ]; then
-    if [[ "$COMPLETED_REMOVES" -gt 0 || "$SUSPENDED_REMOVES" -gt 0 || "$UNAVAILABLE_REMOVES" -gt 0 || "$NO_VIDEO_MARKS" -gt 0 ]]; then
-      UPDATE_PARTS=()
-      if [[ "$COMPLETED_REMOVES" -eq 1 ]]; then
-        UPDATE_PARTS+=("removed 1 completed URL")
-      elif [[ "$COMPLETED_REMOVES" -gt 1 ]]; then
-        UPDATE_PARTS+=("removed $COMPLETED_REMOVES completed URLs")
-      fi
-      if [[ "$SUSPENDED_REMOVES" -eq 1 ]]; then
-        UPDATE_PARTS+=("removed 1 suspended URL")
-      elif [[ "$SUSPENDED_REMOVES" -gt 1 ]]; then
-        UPDATE_PARTS+=("removed $SUSPENDED_REMOVES suspended URLs")
-      fi
-      if [[ "$UNAVAILABLE_REMOVES" -eq 1 ]]; then
-        UPDATE_PARTS+=("removed 1 unavailable URL")
-      elif [[ "$UNAVAILABLE_REMOVES" -gt 1 ]]; then
-        UPDATE_PARTS+=("removed $UNAVAILABLE_REMOVES unavailable URLs")
-      fi
-      if [[ "$NO_VIDEO_MARKS" -eq 1 ]]; then
-        UPDATE_PARTS+=("marked 1 unavailable video URL with [no-video]")
-      elif [[ "$NO_VIDEO_MARKS" -gt 1 ]]; then
-        UPDATE_PARTS+=("marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]")
-      fi
+    UPDATE_PARTS=()
+    add_update_part "$COMPLETED_REMOVES" "removed 1 completed URL" "removed $COMPLETED_REMOVES completed URLs"
+    add_update_part "$SUSPENDED_REMOVES" "removed 1 suspended URL" "removed $SUSPENDED_REMOVES suspended URLs"
+    add_update_part "$UNAVAILABLE_REMOVES" "removed 1 unavailable URL" "removed $UNAVAILABLE_REMOVES unavailable URLs"
+    add_update_part "$NO_VIDEO_MARKS" "marked 1 unavailable video URL with [no-video]" "marked $NO_VIDEO_MARKS unavailable video URLs with [no-video]"
+
+    if [[ "${#UPDATE_PARTS[@]}" -gt 0 ]]; then
       echo "Clipboard updated: ${(j:, :)UPDATE_PARTS}."
-    else
-      echo "Clipboard updated: removed completed URLs."
     fi
   fi
 fi
@@ -695,32 +706,14 @@ fi
 if [ "$FAILURES" -gt 0 ]; then
   if [[ "${#URLS[@]}" -gt 1 && ! ( "$FROM_CLIPBOARD" -eq 1 && "$NO_VIDEO_MARKS" -eq "$FAILURES" ) ]]; then
     FAILURE_PARTS=()
-    if [[ "$SUSPENDED_FAILURES" -eq 1 ]]; then
-      FAILURE_PARTS+=("1 suspended account")
-    elif [[ "$SUSPENDED_FAILURES" -gt 1 ]]; then
-      FAILURE_PARTS+=("$SUSPENDED_FAILURES suspended accounts")
-    fi
-    if [[ "$NO_VIDEO_FAILURES" -eq 1 ]]; then
-      FAILURE_PARTS+=("1 unavailable video")
-    elif [[ "$NO_VIDEO_FAILURES" -gt 1 ]]; then
-      FAILURE_PARTS+=("$NO_VIDEO_FAILURES unavailable videos")
-    fi
-    if [[ "$UNAVAILABLE_FAILURES" -eq 1 ]]; then
-      FAILURE_PARTS+=("1 unavailable post")
-    elif [[ "$UNAVAILABLE_FAILURES" -gt 1 ]]; then
-      FAILURE_PARTS+=("$UNAVAILABLE_FAILURES unavailable posts")
-    fi
-    if [[ "$INSTAGRAM_RETRY_FAILURES" -eq 1 ]]; then
-      FAILURE_PARTS+=("1 retryable Instagram post")
-    elif [[ "$INSTAGRAM_RETRY_FAILURES" -gt 1 ]]; then
-      FAILURE_PARTS+=("$INSTAGRAM_RETRY_FAILURES retryable Instagram posts")
-    fi
+    add_failure_part "$SUSPENDED_FAILURES" "suspended account" "suspended accounts"
+    add_failure_part "$NO_VIDEO_FAILURES" "unavailable video" "unavailable videos"
+    add_failure_part "$UNAVAILABLE_FAILURES" "unavailable post" "unavailable posts"
+    add_failure_part "$INSTAGRAM_RETRY_FAILURES" "retryable Instagram post" "retryable Instagram posts"
+
     OTHER_FAILURES=$((FAILURES - SUSPENDED_FAILURES - NO_VIDEO_FAILURES - UNAVAILABLE_FAILURES - INSTAGRAM_RETRY_FAILURES))
-    if [[ "$OTHER_FAILURES" -eq 1 ]]; then
-      FAILURE_PARTS+=("1 other failure")
-    elif [[ "$OTHER_FAILURES" -gt 1 ]]; then
-      FAILURE_PARTS+=("$OTHER_FAILURES other failures")
-    fi
+    add_failure_part "$OTHER_FAILURES" "other failure" "other failures"
+
     if [[ "${#FAILURE_PARTS[@]}" -gt 0 ]]; then
       echo "Completed with $FAILURES failure(s): ${(j:, :)FAILURE_PARTS}."
     else
