@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 - Unreleased
+## 1.3
 
 - Extract URLs from pasted text, so notes or prose containing multiple links can
   be downloaded sequentially.
