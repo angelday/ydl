@@ -114,3 +114,9 @@ By default `make install` installs to `/usr/local/bin/ydl`. Override `PREFIX`,
 ```sh
 make install BINDIR="$HOME/bin"
 ```
+
+## License
+
+MIT License. You can use, copy, modify, and share `ydl`,
+including in your own projects. Keep the copyright/license notice, and the
+software is provided without warranty.
