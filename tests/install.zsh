@@ -116,6 +116,7 @@ with_tmp() {
       YDL_TEST_PREFIX="$tmp/prefix" \
       YDL_TEST_SOURCE="$tmp/source-ydl" \
       YDL_TEST_BREW_LOG="$tmp/brew.log" \
+      YDL_LEGACY_TARGET="$tmp/usr-local-bin/ydl" \
       YDL_SOURCE_URL="https://example.com/ydl" \
       "$@"
   )
@@ -224,6 +225,47 @@ test_bindir_override_is_respected() {
   [[ -x "$target" ]] || fail "custom bin target is written"
 }
 
+test_legacy_install_is_removed() {
+  local output legacy
+  legacy="$YDL_LEGACY_TARGET"
+  mkdir -p "${legacy:h}"
+  print -r -- "# ydl — video downloader wrapper for yt-dlp" > "$legacy"
+  print -r -- "legacy ydl" >> "$legacy"
+  chmod +x "$legacy"
+
+  output=$("$INSTALLER")
+
+  assert_contains "$output" "Removing legacy ydl at $legacy" "legacy install removal is reported"
+  [[ ! -e "$legacy" ]] || fail "legacy install is removed"
+}
+
+test_unrecognized_legacy_path_is_preserved() {
+  local output legacy
+  legacy="$YDL_LEGACY_TARGET"
+  mkdir -p "${legacy:h}"
+  print -r -- "user script named ydl" > "$legacy"
+  chmod +x "$legacy"
+
+  output=$("$INSTALLER")
+
+  assert_contains "$output" "does not look like this ydl script; leaving it in place" "unrecognized legacy path is reported"
+  [[ -e "$legacy" ]] || fail "unrecognized legacy path is preserved"
+  assert_contains "$(cat "$legacy")" "user script named ydl" "unrecognized legacy content is preserved"
+}
+
+test_legacy_path_matching_target_is_preserved() {
+  local output target
+  target="$YDL_TEST_PREFIX/bin/ydl"
+  print -r -- "old target" > "$target"
+  chmod +x "$target"
+
+  output=$(YDL_LEGACY_TARGET="$target" "$INSTALLER")
+
+  assert_not_contains "$output" "Removing legacy ydl" "target path is not removed as legacy"
+  [[ -x "$target" ]] || fail "target still exists after update"
+  assert_contains "$(cat "$target")" "ydl test source" "target is updated"
+}
+
 with_tmp "installer non-macOS refusal" test_non_macos_refuses
 with_tmp "installer missing Homebrew message" test_missing_homebrew_explains_install_url
 with_tmp "installer installs all missing dependencies" test_all_dependencies_missing_are_installed
@@ -232,5 +274,8 @@ with_tmp "installer skips brew when deps present" test_dependencies_present_skip
 with_tmp "installer first install message" test_first_install_message_and_target
 with_tmp "installer update message" test_update_message_when_target_exists
 with_tmp "installer respects YDL_BINDIR" test_bindir_override_is_respected
+with_tmp "installer removes legacy install" test_legacy_install_is_removed
+with_tmp "installer preserves unrecognized legacy path" test_unrecognized_legacy_path_is_preserved
+with_tmp "installer preserves matching legacy target" test_legacy_path_matching_target_is_preserved
 
 print -- "$TEST_COUNT installer tests passed"

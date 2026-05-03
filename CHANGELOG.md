@@ -39,6 +39,8 @@
   clipboard and media workflow behavior.
 - Add stubbed installer tests for Homebrew/dependency checks, first install,
   update, and custom install directories.
+- Installer removes a stale `/usr/local/bin/ydl` legacy install when it looks
+  like this `ydl` script and Homebrew's active prefix installs elsewhere.
 - Treat reruns of already-converted non-MP4 downloads as already downloaded
   instead of failing on the existing MP4.
 - Simplify default conversion output while keeping codec details in verbose
