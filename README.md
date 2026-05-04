@@ -66,6 +66,16 @@ Show backend output:
 ydl -v "https://example.com/video"
 ```
 
+## Motivation
+
+This project began as a macOS-focused command alias:
+
+```sh
+alias ydl='yt-dlp --user-agent="$USERAGENT" -f "(bestvideo[vcodec~='\''^((he|a)vc|h26[45])'\'']+bestaudio[ext=m4a])/(bestvideo+bestaudio/best)" --external-downloader-args "ffmpeg:-movflags faststart" --postprocessor-args "ffmpeg:-movflags faststart" --xattrs --concurrent-fragments 6'
+```
+
+It has since grown into a small, durable wrapper around that original workflow.
+
 ## Development
 
 The editable source lives in this repository:
