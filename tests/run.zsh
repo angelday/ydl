@@ -210,7 +210,7 @@ with_tmp() {
 test_help() {
   local output
   output=$("$BIN" -h)
-  assert_contains "$output" "ydl 1.3" "help shows version"
+  assert_contains "$output" "ydl 1.3.1" "help shows version"
   assert_contains "$output" "Usage: ydl" "help shows usage"
   assert_contains "$output" "--verbose" "help shows verbose option"
 }

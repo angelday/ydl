@@ -60,7 +60,7 @@ fi
 if [[ "$LEGACY_TARGET" != "$TARGET" && -e "$LEGACY_TARGET" ]]; then
   if grep -q "ydl .*video downloader wrapper for yt-dlp" "$LEGACY_TARGET" 2>/dev/null; then
     print -- "Removing legacy ydl at $LEGACY_TARGET..."
-    if [[ -w "$LEGACY_TARGET" ]]; then
+    if [[ -w "${LEGACY_TARGET:h}" ]]; then
       rm -f "$LEGACY_TARGET"
     else
       sudo rm -f "$LEGACY_TARGET"

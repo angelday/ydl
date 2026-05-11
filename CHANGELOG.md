@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1
+
+- Fix installer cleanup of stale `/usr/local/bin/ydl` legacy installs when the
+  file is writable but its parent directory requires elevated permissions.
+
 ## 1.3
 
 - Extract URLs from pasted text, so notes or prose containing multiple links can

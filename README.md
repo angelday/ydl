@@ -7,7 +7,7 @@ family are converted to H.264 MP4.
 `ydl` is built for a macOS workflow, with Apple-friendly video output and
 clipboard behavior.
 
-![ydl 1.3 in action](ydl_1_3.png)
+![ydl 1.3.1 in action](ydl_1_3.png)
 
 ## Install
 

@@ -90,6 +90,11 @@ STUB
 #!/bin/zsh
 set -e
 
+if [[ "$1" == "rm" ]]; then
+  target="${@: -1}"
+  chmod u+w "${target:h}"
+fi
+
 "$@"
 STUB
 
@@ -239,6 +244,21 @@ test_legacy_install_is_removed() {
   [[ ! -e "$legacy" ]] || fail "legacy install is removed"
 }
 
+test_legacy_install_uses_sudo_when_parent_dir_is_not_writable() {
+  local output legacy
+  legacy="$YDL_LEGACY_TARGET"
+  mkdir -p "${legacy:h}"
+  print -r -- "# ydl — video downloader wrapper for yt-dlp" > "$legacy"
+  print -r -- "legacy ydl" >> "$legacy"
+  chmod +x "$legacy"
+  chmod a-w "${legacy:h}"
+
+  output=$("$INSTALLER")
+
+  assert_contains "$output" "Removing legacy ydl at $legacy" "legacy removal is reported for protected parent dir"
+  [[ ! -e "$legacy" ]] || fail "legacy install is removed from protected parent dir"
+}
+
 test_unrecognized_legacy_path_is_preserved() {
   local output legacy
   legacy="$YDL_LEGACY_TARGET"
@@ -275,6 +295,7 @@ with_tmp "installer first install message" test_first_install_message_and_target
 with_tmp "installer update message" test_update_message_when_target_exists
 with_tmp "installer respects YDL_BINDIR" test_bindir_override_is_respected
 with_tmp "installer removes legacy install" test_legacy_install_is_removed
+with_tmp "installer removes legacy install from protected parent dir" test_legacy_install_uses_sudo_when_parent_dir_is_not_writable
 with_tmp "installer preserves unrecognized legacy path" test_unrecognized_legacy_path_is_preserved
 with_tmp "installer preserves matching legacy target" test_legacy_path_matching_target_is_preserved
 
