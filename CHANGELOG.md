@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4
+
+- Add `.torrent` URL support. Torrent files are fetched with browser cookies
+  exported through `yt-dlp`, then downloaded with `transmission-cli`.
+- Use Safari cookies by default for torrent URLs, while preserving `-c chrome`
+  / `-c firefox` browser selection.
+- Export browser cookies through yt-dlp's Python cookie backend when available,
+  avoiding an unnecessary yt-dlp generic extraction pass for torrent URLs.
+- Run Transmission with an isolated temporary config, separate from the GUI app
+  and default Transmission state.
+- Disable DHT, PEX, LPD, port forwarding, and RPC in the temporary Transmission
+  config for private-tracker-friendly downloads.
+- Render Transmission torrent progress through the existing ASCII progress bar,
+  using a pseudo-tty so progress updates are not heavily buffered.
+- Exit torrent downloads after completion so clipboard queues can continue to
+  later URLs. Use a regular torrent client for long-term seeding.
+- Add installer support for the `transmission-cli` Homebrew dependency.
+
 ## 1.3.1
 
 - Fix installer cleanup of stale `/usr/local/bin/ydl` legacy installs when the

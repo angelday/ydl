@@ -162,8 +162,8 @@ test_all_dependencies_missing_are_installed() {
   output=$("$INSTALLER")
   brew_log=$(cat "$YDL_TEST_BREW_LOG")
 
-  assert_contains "$output" "Installing dependencies with Homebrew: yt-dlp ffmpeg" "all missing dependencies are reported"
-  assert_contains "$brew_log" "install yt-dlp ffmpeg" "all missing dependencies are installed"
+  assert_contains "$output" "Installing dependencies with Homebrew: yt-dlp ffmpeg transmission-cli" "all missing dependencies are reported"
+  assert_contains "$brew_log" "install yt-dlp ffmpeg transmission-cli" "all missing dependencies are installed"
 }
 
 test_only_ffmpeg_dependency_missing_is_installed() {
@@ -173,6 +173,10 @@ test_only_ffmpeg_dependency_missing_is_installed() {
 #!/bin/zsh
 STUB
   chmod +x "$PWD/bin/yt-dlp"
+  cat > "$PWD/bin/transmission-cli" <<'STUB'
+#!/bin/zsh
+STUB
+  chmod +x "$PWD/bin/transmission-cli"
 
   output=$("$INSTALLER")
   brew_log=$(cat "$YDL_TEST_BREW_LOG")
@@ -185,7 +189,7 @@ STUB
 test_dependencies_present_skip_brew_install() {
   local output brew_log
 
-  for cmd in yt-dlp ffmpeg ffprobe; do
+  for cmd in yt-dlp ffmpeg ffprobe transmission-cli; do
     print -r -- '#!/bin/zsh' > "$PWD/bin/$cmd"
     chmod +x "$PWD/bin/$cmd"
   done

@@ -45,17 +45,24 @@ fi
 outfile="$PWD/download.${YDL_STUB_EXT:-webm}"
 counter_file="$PWD/.ydl-stub-count"
 print_file=""
+cookies_file=""
 next_is_print_template=0
 next_is_print_file=0
+next_is_cookies_file=0
 emit_progress=0
 
 for arg in "$@"; do
-  if [[ "$next_is_print_file" -eq 1 ]]; then
+  if [[ "$next_is_cookies_file" -eq 1 ]]; then
+    cookies_file="$arg"
+    next_is_cookies_file=0
+  elif [[ "$next_is_print_file" -eq 1 ]]; then
     print_file="$arg"
     next_is_print_file=0
   elif [[ "$next_is_print_template" -eq 1 ]]; then
     next_is_print_template=0
     next_is_print_file=1
+  elif [[ "$arg" == "--cookies" ]]; then
+    next_is_cookies_file=1
   elif [[ "$arg" == "--print-to-file" ]]; then
     next_is_print_template=1
   elif [[ "$arg" == "--progress" ]]; then
@@ -99,6 +106,10 @@ fi
 
 if [[ "$emit_progress" -eq 0 ]]; then
   print -r -- "stub yt-dlp raw output"
+fi
+
+if [[ -n "$cookies_file" ]]; then
+  print -r -- "# Netscape HTTP Cookie File" > "$cookies_file"
 fi
 
 if [[ "$YDL_STUB_UNIQUE_OUTPUTS" -eq 1 ]]; then
@@ -177,6 +188,23 @@ STUB
 #!/bin/zsh
 set -e
 
+output_file=""
+next_is_output=0
+
+for arg in "$@"; do
+  if [[ "$next_is_output" -eq 1 ]]; then
+    output_file="$arg"
+    next_is_output=0
+  elif [[ "$arg" == "-o" ]]; then
+    next_is_output=1
+  fi
+done
+
+if [[ -n "$output_file" ]]; then
+  print -r -- "d8:announce13:http://tracker4:infod6:lengthi1e4:name4:teste" > "$output_file"
+  exit 0
+fi
+
 if [[ -n "$YDL_STUB_TWEET_UNAVAILABLE" ]]; then
   print -r -- '"tweets":{"entities":{},"errors":{"12345":{}},"fetchStatus":{"12345":"failed"}}'
 else
@@ -184,7 +212,44 @@ else
 fi
 STUB
 
-  chmod +x "$dir/yt-dlp" "$dir/ffprobe" "$dir/ffmpeg" "$dir/pbpaste" "$dir/pbcopy" "$dir/curl"
+  cat > "$dir/transmission-cli" <<'STUB'
+#!/bin/zsh
+set -e
+
+if [[ -n "$YDL_STUB_TRANSMISSION_ARGS_FILE" ]]; then
+  printf '%s\n' "$@" > "$YDL_STUB_TRANSMISSION_ARGS_FILE"
+fi
+
+next_is_config_dir=0
+for arg in "$@"; do
+  if [[ "$next_is_config_dir" -eq 1 ]]; then
+    if [[ -n "$YDL_STUB_TRANSMISSION_SETTINGS_FILE" && -f "$arg/settings.json" ]]; then
+      cp "$arg/settings.json" "$YDL_STUB_TRANSMISSION_SETTINGS_FILE"
+    fi
+    next_is_config_dir=0
+  elif [[ "$arg" == "-g" ]]; then
+    next_is_config_dir=1
+  fi
+done
+
+if [[ -n "$YDL_STUB_TRANSMISSION_FAIL" ]]; then
+  print -u2 -- "stub transmission-cli failure"
+  exit 1
+fi
+
+if [[ -n "$YDL_STUB_TRANSMISSION_ONLY_99" ]]; then
+  print -r -- "Progress: 99.0%, dl from 1 of 1 peers (0 KB/s), ul to 0 of 0 peers (0 KB/s)"
+elif [[ -n "$YDL_STUB_TRANSMISSION_FINISH_NONZERO" ]]; then
+  print -r -- "Progress: 100.0%, dl from 4 of 4 peers (491.5 kB/s), ul to 0 (0 B/s) [0.00]"
+  print -r -- "movie.mkv: Calling script '/tmp/finish'"
+  exit 143
+else
+  print -r -- "Progress: 50.0%, dl from 1 of 1 peers (1.0 MB/s), ul to 0 of 0 peers (0 KB/s)"
+  print -r -- "Progress: 100.0%, dl from 0 of 0 peers (0 KB/s), ul to 0 of 0 peers (0 KB/s)"
+fi
+STUB
+
+  chmod +x "$dir/yt-dlp" "$dir/ffprobe" "$dir/ffmpeg" "$dir/pbpaste" "$dir/pbcopy" "$dir/curl" "$dir/transmission-cli"
 }
 
 with_tmp() {
@@ -210,7 +275,7 @@ with_tmp() {
 test_help() {
   local output
   output=$("$BIN" -h)
-  assert_contains "$output" "ydl 1.3.1" "help shows version"
+  assert_contains "$output" "ydl 1.4" "help shows version"
   assert_contains "$output" "Usage: ydl" "help shows usage"
   assert_contains "$output" "--verbose" "help shows verbose option"
 }
@@ -300,6 +365,72 @@ test_cookies_default_to_safari() {
   assert_contains "$args" "--cookies-from-browser" "default cookie option is forwarded"
   assert_contains "$args" "safari" "cookie browser defaults to safari"
   assert_contains "$args" "https://example.com/video" "URL is preserved when -c has no browser argument"
+}
+
+test_torrent_url_uses_browser_cookies_and_transmission() {
+  local output args_file transmission_args_file settings_file args transmission_args settings
+  args_file="$PWD/yt-dlp-args.txt"
+  transmission_args_file="$PWD/transmission-args.txt"
+  settings_file="$PWD/transmission-settings.json"
+
+  output=$(YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_TRANSMISSION_ARGS_FILE="$transmission_args_file" YDL_STUB_TRANSMISSION_SETTINGS_FILE="$settings_file" "$BIN" "https://example.com/download/movie.mkv.torrent?id=123")
+  args=$(cat "$args_file")
+  transmission_args=$(cat "$transmission_args_file")
+  settings=$(cat "$settings_file")
+
+  assert_not_contains "$(printf '%s\n' ./*.torrent(N:t))" "movie.mkv.torrent" "fetched torrent file is temporary"
+  assert_contains "$args" "--cookies-from-browser" "torrent export uses browser cookies"
+  assert_contains "$args" "safari" "torrent browser defaults to safari"
+  assert_contains "$args" "--cookies" "torrent export writes a cookie jar"
+  assert_contains "$args" "--skip-download" "torrent export does not download through yt-dlp"
+  assert_contains "$args" "https://example.com/" "torrent cookie export uses site origin"
+  assert_not_contains "$args" "https://example.com/download/movie.mkv.torrent?id=123" "torrent URL is not passed to yt-dlp"
+  assert_contains "$output" "Torrent  [############------------]  50%  1.0 MB/s" "torrent progress is rendered"
+  assert_contains "$output" "Torrent  [########################] 100%" "torrent progress completes"
+  assert_contains "$transmission_args" "-g" "transmission-cli gets isolated config directory"
+  assert_contains "$transmission_args" "-w" "transmission-cli gets download directory option"
+  assert_contains "$transmission_args" "$PWD" "transmission-cli downloads into current directory"
+  assert_contains "$transmission_args" "-M" "transmission-cli disables port mapping"
+  assert_contains "$transmission_args" "-f" "transmission-cli gets finish hook"
+  assert_contains "$transmission_args" ".torrent" "transmission-cli receives fetched torrent file"
+  assert_contains "$settings" '"dht-enabled": false' "transmission config disables DHT"
+  assert_contains "$settings" '"pex-enabled": false' "transmission config disables PEX"
+  assert_contains "$settings" '"lpd-enabled": false' "transmission config disables LPD"
+  assert_contains "$settings" '"rpc-enabled": false' "transmission config disables RPC"
+  assert_not_contains "$output" "Detected video codec" "torrent path skips video inspection"
+}
+
+test_torrent_url_honors_named_cookie_browser() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" "$BIN" -c chrome "https://example.com/download/movie.torrent" >/dev/null
+  args=$(cat "$args_file")
+
+  assert_contains "$args" "--cookies-from-browser" "torrent named browser uses cookie export"
+  assert_contains "$args" "chrome" "torrent named browser is forwarded"
+}
+
+test_torrent_success_renders_final_100_percent() {
+  local output
+
+  output=$(YDL_STUB_TRANSMISSION_ONLY_99=1 "$BIN" "https://example.com/download/movie.torrent")
+
+  assert_contains "$output" "Torrent  [#######################-]  99%" "torrent progress can receive 99 percent"
+  assert_contains "$output" "Torrent  [########################] 100%" "successful torrent exit renders final 100 percent"
+}
+
+test_torrent_finish_hook_nonzero_is_success() {
+  local output exit_code
+
+  set +e
+  output=$(YDL_STUB_TRANSMISSION_FINISH_NONZERO=1 "$BIN" "https://example.com/download/movie.torrent" 2>&1)
+  exit_code=$?
+  set -e
+
+  [[ "$exit_code" -eq 0 ]] || fail "finished torrent exits successfully despite finish hook termination"
+  assert_contains "$output" "Torrent  [########################] 100%" "finish hook completion renders 100 percent"
+  assert_not_contains "$output" "Error: transmission-cli failed." "finish hook completion is not reported as failure"
 }
 
 test_existing_download_is_reported() {
@@ -676,6 +807,10 @@ with_tmp "verbose backend output" test_verbose_shows_backend_output
 with_tmp "extra yt-dlp args forwarding" test_extra_yt_dlp_args_are_forwarded
 with_tmp "cookies from named browser forwarding" test_cookies_from_named_browser_are_forwarded
 with_tmp "cookies default browser forwarding" test_cookies_default_to_safari
+with_tmp "torrent uses browser cookies and transmission" test_torrent_url_uses_browser_cookies_and_transmission
+with_tmp "torrent honors named cookie browser" test_torrent_url_honors_named_cookie_browser
+with_tmp "torrent success renders final 100 percent" test_torrent_success_renders_final_100_percent
+with_tmp "torrent finish hook nonzero is success" test_torrent_finish_hook_nonzero_is_success
 with_tmp "existing download report" test_existing_download_is_reported
 with_tmp "vp9 conversion path" test_vp9_download_converts_to_mp4
 with_tmp "verbose conversion details" test_verbose_conversion_shows_codec_details

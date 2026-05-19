@@ -5,7 +5,7 @@
 # Copyright (c) 2026 József Schaffer / Plastik média — MIT License
 
 set -e
-VERSION="1.3.1"
+VERSION="1.4"
 
 require_macos() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -19,11 +19,17 @@ looks_like_url() {
   [[ "$1" =~ '^(https?|ftp)://[^[:space:]]+$' ]]
 }
 
+looks_like_torrent_url() {
+  local path="${1%%\?*}"
+  [[ "${(L)path}" == *.torrent ]]
+}
+
 show_help() {
   echo "ydl $VERSION"
   echo "Usage: ydl [-v] [-c [browser]] ['URL or text with URLs'] [extra yt-dlp args...]"
   echo ""
   echo "Downloads the best available video using yt-dlp, preferring H.264/H.265."
+  echo "Torrent URLs are fetched with browser cookies and downloaded with transmission-cli."
   echo "If no input is given, reads URLs from clipboard text."
   echo "If input contains multiple URLs, downloads them one by one."
   echo "Videos outside Apple-friendly H.264/H.265 are converted to H.264 MP4."
@@ -100,6 +106,53 @@ render_progress() {
     printf '  %s' "$speed"
   fi
   if [[ -n "$eta" && "$eta" != "N/A" && "$eta" != "NA" && "$eta" != "Unknown" ]]; then
+    printf '  ETA %s' "$eta"
+  fi
+}
+
+render_torrent_progress() {
+  local percent_text="$1"
+  local speed="${2:-}"
+  local eta="${3:-}"
+  local percent="${percent_text//[^0-9.]/}"
+  local whole="${percent%%.*}"
+  local width=24
+  local filled empty bar=""
+  local i
+  PROGRESS_RENDERED=1
+  if [[ -n "$PROGRESS_RENDERED_FILE" ]]; then
+    : > "$PROGRESS_RENDERED_FILE"
+  fi
+
+  if [[ -z "$whole" ]]; then
+    whole=0
+  fi
+  if (( whole < 0 )); then
+    whole=0
+  elif (( whole > 100 )); then
+    whole=100
+  fi
+  if (( whole < PROGRESS_LAST_WHOLE )); then
+    whole=$PROGRESS_LAST_WHOLE
+  else
+    PROGRESS_LAST_WHOLE=$whole
+  fi
+
+  filled=$(( whole * width / 100 ))
+  empty=$(( width - filled ))
+
+  for (( i = 0; i < filled; i++ )); do
+    bar="${bar}#"
+  done
+  for (( i = 0; i < empty; i++ )); do
+    bar="${bar}-"
+  done
+
+  printf '\r\033[KTorrent  [%s] %3d%%' "$bar" "$whole"
+  if [[ -n "$speed" && "$speed" != "0B" && "$speed" != "0B/s" ]]; then
+    printf '  %s' "$speed"
+  fi
+  if [[ -n "$eta" && "$eta" != "0s" ]]; then
     printf '  ETA %s' "$eta"
   fi
 }
@@ -265,6 +318,187 @@ run_ytdlp() {
   fi
 
   rm -f "$LOG_FILE" "$PROGRESS_RENDERED_FILE" "$PROGRESS_ALREADY_DOWNLOADED_FILE"
+  return "$exit_code"
+}
+
+export_browser_cookies() {
+  local browser="$1"
+  local cookie_jar="$2"
+  local ytdlp_bin ytdlp_python
+
+  ytdlp_bin=$(command -v yt-dlp)
+  ytdlp_python=$(head -n 1 "$ytdlp_bin" 2>/dev/null | sed 's/^#!//')
+
+  if [[ -x "$ytdlp_python" && "${(L)ytdlp_python}" == *python* ]]; then
+    "$ytdlp_python" - "$browser" "$cookie_jar" <<'PY'
+import sys
+from yt_dlp.cookies import extract_cookies_from_browser
+
+browser, cookie_jar = sys.argv[1], sys.argv[2]
+jar = extract_cookies_from_browser(browser)
+jar.filename = cookie_jar
+jar.save(ignore_discard=True, ignore_expires=True)
+PY
+    return
+  fi
+
+  yt-dlp --cookies-from-browser "$browser" --cookies "$cookie_jar" --skip-download --ignore-errors "https://example.com/"
+}
+
+write_transmission_config() {
+  local config_dir="$1"
+
+  mkdir -p "$config_dir"
+  cat > "$config_dir/settings.json" <<'EOF'
+{
+  "dht-enabled": false,
+  "lpd-enabled": false,
+  "pex-enabled": false,
+  "port-forwarding-enabled": false,
+  "rpc-enabled": false,
+  "peer-port-random-on-start": true,
+  "start-added-torrents": true
+}
+EOF
+}
+
+run_torrent() {
+  local URL="$1"
+  local TORRENT_NAME TORRENT_FILE COOKIE_JAR CONFIG_DIR LOG_FILE TRANSMISSION_OUTPUT_FILE FINISH_SCRIPT PROGRESS_RENDERED_FILE
+  local line percent speed eta exit_code transmission_log
+  YDL_LAST_ERROR_LOG=""
+  YDL_LAST_FAILURE_KIND=""
+  PROGRESS_LAST_WHOLE=0
+  PROGRESS_RENDERED=0
+
+  if ! command -v transmission-cli >/dev/null 2>&1; then
+    YDL_LAST_FAILURE_KIND="other"
+    echo "Error: transmission-cli is required for torrent downloads. Install it with: brew install transmission-cli"
+    return 1
+  fi
+
+  TORRENT_NAME="${URL%%\?*}"
+  TORRENT_NAME="${TORRENT_NAME:t}"
+  [[ -n "$TORRENT_NAME" ]] || TORRENT_NAME="download.torrent"
+  TORRENT_FILE=$(mktemp -t ydl-torrent-file.XXXXXX.torrent)
+  COOKIE_JAR=$(mktemp -t ydl-torrent-cookies.XXXXXX)
+  CONFIG_DIR=$(mktemp -d -t ydl-transmission-config.XXXXXX)
+  LOG_FILE=$(mktemp -t ydl-torrent.XXXXXX)
+  TRANSMISSION_OUTPUT_FILE=$(mktemp -t ydl-torrent-transmission-output.XXXXXX)
+  FINISH_SCRIPT=$(mktemp -t ydl-torrent-finish.XXXXXX)
+  PROGRESS_RENDERED_FILE=$(mktemp -t ydl-torrent-progress-rendered.XXXXXX)
+  write_transmission_config "$CONFIG_DIR"
+  cat > "$FINISH_SCRIPT" <<'EOF'
+#!/bin/zsh
+kill -TERM "$PPID" 2>/dev/null || true
+EOF
+  chmod +x "$FINISH_SCRIPT"
+  rm -f "$COOKIE_JAR" "$PROGRESS_RENDERED_FILE"
+
+  if [ "$VERBOSE" -eq 1 ]; then
+    echo "Exporting $COOKIE_BROWSER cookies with yt-dlp..."
+    export_browser_cookies "$COOKIE_BROWSER" "$COOKIE_JAR"
+    echo "Fetching torrent file: $TORRENT_NAME"
+    curl -fL -b "$COOKIE_JAR" -e "$URL" -A "$UA" -o "$TORRENT_FILE" "$URL"
+    echo "Downloading torrent payload with transmission-cli..."
+    transmission-cli -g "$CONFIG_DIR" -w "$PWD" -M -f "$FINISH_SCRIPT" "$TORRENT_FILE"
+    exit_code=$?
+    if [[ "$exit_code" -eq 143 ]]; then
+      exit_code=0
+    fi
+    rm -rf "$CONFIG_DIR"
+    rm -f "$TORRENT_FILE" "$COOKIE_JAR" "$LOG_FILE" "$TRANSMISSION_OUTPUT_FILE" "$FINISH_SCRIPT" "$PROGRESS_RENDERED_FILE"
+    return "$exit_code"
+  fi
+
+  set +e
+  export_browser_cookies "$COOKIE_BROWSER" "$COOKIE_JAR" >/dev/null 2>"$LOG_FILE"
+  exit_code=$?
+  set -e
+  if [ "$exit_code" -ne 0 ]; then
+    YDL_LAST_FAILURE_KIND="other"
+    echo "Error: could not export browser cookies with yt-dlp."
+    if [ -s "$LOG_FILE" ]; then
+      cat "$LOG_FILE"
+    fi
+    rm -rf "$CONFIG_DIR"
+    rm -f "$TORRENT_FILE" "$COOKIE_JAR" "$LOG_FILE" "$TRANSMISSION_OUTPUT_FILE" "$FINISH_SCRIPT" "$PROGRESS_RENDERED_FILE"
+    return "$exit_code"
+  fi
+
+  set +e
+  curl -fL -sS -b "$COOKIE_JAR" -e "$URL" -A "$UA" -o "$TORRENT_FILE" "$URL" 2>"$LOG_FILE"
+  exit_code=$?
+  set -e
+  if [ "$exit_code" -ne 0 ]; then
+    YDL_LAST_FAILURE_KIND="other"
+    echo "Error: could not fetch torrent file."
+    if [ -s "$LOG_FILE" ]; then
+      cat "$LOG_FILE"
+    fi
+    rm -rf "$CONFIG_DIR"
+    rm -f "$TORRENT_FILE" "$COOKIE_JAR" "$LOG_FILE" "$TRANSMISSION_OUTPUT_FILE" "$FINISH_SCRIPT" "$PROGRESS_RENDERED_FILE"
+    return "$exit_code"
+  fi
+
+  set +e
+  script -q /dev/null transmission-cli -g "$CONFIG_DIR" -w "$PWD" -M -f "$FINISH_SCRIPT" "$TORRENT_FILE" 2>"$LOG_FILE" | tee "$TRANSMISSION_OUTPUT_FILE" | perl -MIO::Handle -ne 'BEGIN { $/ = "\r"; STDOUT->autoflush(1) } s/[\x04\x08]//g; s/\r/\n/g; print' | while IFS= read -r line; do
+    percent=""
+    speed=""
+    eta=""
+
+    if [[ "$line" =~ 'Progress: +([0-9]+(\.[0-9]+)?)%' ]]; then
+      percent="$match[1]%"
+    elif [[ "$line" =~ '([0-9]+(\.[0-9]+)?)%.*(Done|ETA)' ]]; then
+      percent="$match[1]%"
+    fi
+    if [[ "$line" =~ 'dl[^()]*\(([^()]*/s)\)' ]]; then
+      speed="$match[1]"
+    fi
+    if [[ "$line" =~ 'ETA:?[ ]*([^],)]+)' ]]; then
+      eta="$match[1]"
+    fi
+
+    if [[ -n "$percent" ]]; then
+      render_torrent_progress "$percent" "$speed" "$eta"
+    fi
+  done
+  exit_code=$pipestatus[1]
+  set -e
+  if [[ "$exit_code" -eq 143 ]]; then
+    exit_code=0
+  fi
+  if [[ "$exit_code" -ne 0 && -s "$TRANSMISSION_OUTPUT_FILE" ]] && (grep -q 'Progress: 100\.0%' "$TRANSMISSION_OUTPUT_FILE" || grep -q 'Calling script' "$TRANSMISSION_OUTPUT_FILE"); then
+    exit_code=0
+  fi
+
+  if [[ -e "$PROGRESS_RENDERED_FILE" ]]; then
+    PROGRESS_RENDERED=1
+  fi
+  if [ "$exit_code" -eq 0 ]; then
+    render_torrent_progress "100%"
+  fi
+  if [ "$PROGRESS_RENDERED" -eq 1 ]; then
+    printf '\n'
+  fi
+
+  if [ "$exit_code" -ne 0 ]; then
+    YDL_LAST_FAILURE_KIND="other"
+    transmission_log=""
+    if [ -s "$LOG_FILE" ]; then
+      transmission_log=$(cat "$LOG_FILE")
+    fi
+    if [[ -z "$transmission_log" && -s "$TRANSMISSION_OUTPUT_FILE" ]]; then
+      transmission_log=$(tail -n 20 "$TRANSMISSION_OUTPUT_FILE")
+    fi
+    echo "Error: transmission-cli failed."
+    if [[ -n "$transmission_log" ]]; then
+      print -r -- "$transmission_log"
+    fi
+  fi
+
+  rm -rf "$CONFIG_DIR"
+  rm -f "$TORRENT_FILE" "$COOKIE_JAR" "$LOG_FILE" "$TRANSMISSION_OUTPUT_FILE" "$FINISH_SCRIPT" "$PROGRESS_RENDERED_FILE"
   return "$exit_code"
 }
 
@@ -438,6 +672,7 @@ run_ffmpeg() {
 
 VERBOSE=0
 COOKIES=()
+COOKIE_BROWSER="safari"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -451,12 +686,11 @@ while [ "$#" -gt 0 ]; do
       ;;
     -c)
       shift
-      BROWSER="safari"
       if [[ -n "$1" && "$1" != http* && "$1" != -* ]]; then
-        BROWSER="$1"
+        COOKIE_BROWSER="$1"
         shift
       fi
-      COOKIES=(--cookies-from-browser "$BROWSER")
+      COOKIES=(--cookies-from-browser "$COOKIE_BROWSER")
       ;;
     --)
       shift
@@ -526,6 +760,11 @@ download_one() {
   local AUDIO_ARGS
 
   echo "Downloading: $URL"
+
+  if looks_like_torrent_url "$URL"; then
+    run_torrent "$URL"
+    return
+  fi
 
 # Download
 # --xattrs: store metadata in macOS extended attributes

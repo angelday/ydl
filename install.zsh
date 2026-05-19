@@ -24,6 +24,7 @@ missing=()
 need_command yt-dlp || missing+=(yt-dlp)
 need_command ffmpeg || missing+=(ffmpeg)
 need_command ffprobe || missing+=(ffmpeg)
+need_command transmission-cli || missing+=(transmission-cli)
 packages=("${(@u)missing}")
 
 if (( ${#packages[@]} > 0 )); then

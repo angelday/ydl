@@ -2,12 +2,13 @@
 
 `ydl` is a small zsh wrapper around `yt-dlp` for downloading video with a
 preference for Apple-friendly H.264/H.265 output. Videos outside that codec
-family are converted to H.264 MP4.
+family are converted to H.264 MP4. Torrent URLs are fetched with browser cookies
+from `yt-dlp` and downloaded with `transmission-cli`.
 
 `ydl` is built for a macOS workflow, with Apple-friendly video output and
 clipboard behavior.
 
-![ydl 1.3.1 in action](ydl_1_3.png)
+![ydl 1.4 in action](ydl_1_3.png)
 
 ## Install
 
@@ -17,7 +18,7 @@ Install `ydl` and its Homebrew dependencies with one command:
 /bin/zsh -c "$(curl -fsSL https://raw.githubusercontent.com/angelday/ydl/main/install.zsh)"
 ```
 
-The installer checks for `yt-dlp`, `ffmpeg`, and `ffprobe`. Missing dependencies
+The installer checks for `yt-dlp`, `ffmpeg`, `ffprobe`, and `transmission-cli`. Missing dependencies
 are installed with Homebrew. If Homebrew is not installed, the installer will
 ask you to install it from <https://brew.sh/> and run the command again. On
 non-macOS systems, the installer refuses to run.
@@ -59,6 +60,23 @@ ydl -c chrome "https://www.instagram.com/reel/..."
 ```
 
 `-c` defaults to Safari.
+
+Download a torrent URL:
+
+```sh
+ydl "https://example.com/download/file.torrent?id=123"
+```
+
+Torrent URLs always use browser cookies via `yt-dlp`; Safari is the default,
+and `-c chrome` / `-c firefox` selects another browser. Torrent payloads are
+downloaded with `transmission-cli` using an isolated temporary config with DHT,
+PEX, LPD, port forwarding, and RPC disabled. `ydl` exits after the payload
+finishes; use a regular torrent client for long-term seeding.
+
+Safari caveat: yt-dlp's Safari cookie extractor reads Safari's persisted
+cookie store. Sites that rely on memory-only session cookies may fail even when
+they appear logged in inside Safari. In that case, use a persistent login if the
+site offers one, or try `-c chrome` / `-c firefox`.
 
 Show backend output:
 
