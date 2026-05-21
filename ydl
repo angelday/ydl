@@ -5,7 +5,7 @@
 # Copyright (c) 2026 József Schaffer / Plastik média — MIT License
 
 set -e
-VERSION="1.4"
+VERSION="1.4.1"
 
 require_macos() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -26,9 +26,10 @@ looks_like_torrent_url() {
 
 show_help() {
   echo "ydl $VERSION"
-  echo "Usage: ydl [-v] [-c [browser]] ['URL or text with URLs'] [extra yt-dlp args...]"
+  echo "Usage: ydl [-a] [-v] [-c [browser]] ['URL or text with URLs'] [extra yt-dlp args...]"
   echo ""
   echo "Downloads the best available video using yt-dlp, preferring H.264/H.265."
+  echo "Use --audio to save only audio as M4A."
   echo "Torrent URLs are fetched with browser cookies and downloaded with transmission-cli."
   echo "If no input is given, reads URLs from clipboard text."
   echo "If input contains multiple URLs, downloads them one by one."
@@ -38,6 +39,7 @@ show_help() {
   echo "Accepted URL schemes: http, https, ftp."
   echo ""
   echo "Options:"
+  echo "  -a, --audio    Save only audio as M4A"
   echo "  -c [browser]   Use cookies from browser (default: safari)"
   echo "  -v, --verbose  Show raw yt-dlp and ffmpeg output"
   echo "  -h, --help     Show this help"
@@ -54,6 +56,10 @@ extract_urls() {
     while (m{(?:https?|ftp)://[^\s<>"'"'"']+}g) {
       $url = $&;
       $start = $-[0];
+      $line_start = rindex($_, "\n", $start);
+      $line_start = $line_start < 0 ? 0 : $line_start + 1;
+      $before_url = substr($_, $line_start, $start - $line_start);
+      next if $before_url =~ /^\s*#/;
       $prefix = substr($_, $start >= 10 ? $start - 10 : 0, $start >= 10 ? 10 : $start);
       next if $skip_marked && $prefix eq "[no-video]";
       $url =~ s/[.,;:!?]+$//;
@@ -202,19 +208,35 @@ run_ytdlp() {
   local LOG_FILE exit_code
   local PROGRESS_RENDERED_FILE PROGRESS_ALREADY_DOWNLOADED_FILE
   local line percent speed eta
+  local arg
+  local -a MODE_ARGS PLAYLIST_ARGS
   YDL_LAST_ERROR_LOG=""
   YDL_LAST_FAILURE_KIND=""
   PROGRESS_LAST_WHOLE=0
   PROGRESS_RENDERED=0
   PROGRESS_ALREADY_DOWNLOADED=0
 
+  PLAYLIST_ARGS=(--no-playlist)
+  for arg in "${EXTRA_ARGS[@]}"; do
+    if [[ "$arg" == "--yes-playlist" || "$arg" == "--no-playlist" ]]; then
+      PLAYLIST_ARGS=()
+      break
+    fi
+  done
+
+  if [ "$AUDIO_ONLY" -eq 1 ]; then
+    MODE_ARGS=(-f "bestaudio[ext=m4a]/bestaudio" --extract-audio --audio-format m4a --audio-quality 0)
+  else
+    MODE_ARGS=(-f "$FORMAT" --postprocessor-args "ffmpeg:-movflags faststart")
+  fi
+
   if [ "$VERBOSE" -eq 1 ]; then
     yt-dlp --user-agent="$UA" \
       "${COOKIES[@]}" \
-      -f "$FORMAT" \
+      "${MODE_ARGS[@]}" \
       --xattrs \
       --concurrent-fragments 6 \
-      --postprocessor-args "ffmpeg:-movflags faststart" \
+      "${PLAYLIST_ARGS[@]}" \
       --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
       "$URL" "${EXTRA_ARGS[@]}"
     return
@@ -228,10 +250,10 @@ run_ytdlp() {
   set +e
   yt-dlp --user-agent="$UA" \
     "${COOKIES[@]}" \
-    -f "$FORMAT" \
+    "${MODE_ARGS[@]}" \
     --xattrs \
     --concurrent-fragments 6 \
-    --postprocessor-args "ffmpeg:-movflags faststart" \
+    "${PLAYLIST_ARGS[@]}" \
     --print-to-file after_move:filepath "$DOWNLOAD_PATH_FILE" \
     --progress \
     --newline \
@@ -671,11 +693,16 @@ run_ffmpeg() {
 }
 
 VERBOSE=0
+AUDIO_ONLY=0
 COOKIES=()
 COOKIE_BROWSER="safari"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    -a|--audio)
+      AUDIO_ONLY=1
+      shift
+      ;;
     -h|--help)
       show_help
       exit 0
@@ -800,6 +827,10 @@ download_one() {
     fi
   elif [[ "$PROGRESS_RENDERED" -eq 0 && "$VERBOSE" -eq 0 ]]; then
     echo "File ready: $INPUT_FILE"
+  fi
+
+  if [ "$AUDIO_ONLY" -eq 1 ]; then
+    return 0
   fi
 
 # Re-encode codecs that are less broadly compatible with Apple/QuickTime.

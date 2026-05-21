@@ -275,8 +275,9 @@ with_tmp() {
 test_help() {
   local output
   output=$("$BIN" -h)
-  assert_contains "$output" "ydl 1.4" "help shows version"
+  assert_contains "$output" "ydl 1.4.1" "help shows version"
   assert_contains "$output" "Usage: ydl" "help shows usage"
+  assert_contains "$output" "--audio" "help shows audio option"
   assert_contains "$output" "--verbose" "help shows verbose option"
 }
 
@@ -342,6 +343,46 @@ test_extra_yt_dlp_args_are_forwarded() {
   assert_contains "$args" "--write-info-json" "extra yt-dlp flag is forwarded"
   assert_contains "$args" "--download-archive" "extra yt-dlp option is forwarded"
   assert_contains "$args" "archive.txt" "extra yt-dlp option value is forwarded"
+}
+
+test_download_defaults_to_no_playlist() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video?list=playlist" >/dev/null
+  args=$(cat "$args_file")
+
+  assert_contains "$args" "--no-playlist" "playlist URLs default to single-item downloads"
+}
+
+test_explicit_playlist_option_is_not_overridden() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video?list=playlist" --yes-playlist >/dev/null
+  args=$(cat "$args_file")
+
+  assert_contains "$args" "--yes-playlist" "explicit playlist option is forwarded"
+  assert_not_contains "$args" "--no-playlist" "explicit playlist option suppresses default no-playlist"
+}
+
+test_audio_only_downloads_m4a_and_skips_video_conversion() {
+  local args_file args output
+  args_file="$PWD/yt-dlp-args.txt"
+
+  output=$(YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=m4a YDL_STUB_VIDEO_CODEC=vp9 YDL_STUB_AUDIO_CODEC=aac "$BIN" --audio "https://example.com/video")
+  args=$(cat "$args_file")
+
+  [[ -f download.m4a ]] || fail "audio-only m4a file exists"
+  [[ ! -f download.mp4 ]] || fail "audio-only mode does not create mp4"
+  assert_contains "$args" "bestaudio[ext=m4a]/bestaudio" "audio-only format prefers m4a"
+  assert_contains "$args" "--extract-audio" "audio extraction is enabled"
+  assert_contains "$args" "--audio-format" "audio format option is forwarded"
+  assert_contains "$args" "m4a" "audio format is m4a"
+  assert_contains "$args" "--no-playlist" "audio-only mode defaults to single-item downloads"
+  assert_contains "$args" "after_move:filepath" "audio-only records final filepath"
+  assert_contains "$output" "Download [############------------]  50%" "audio download progress is rendered"
+  assert_not_contains "$output" "Converting [" "audio-only mode skips video conversion"
 }
 
 test_cookies_from_named_browser_are_forwarded() {
@@ -805,6 +846,9 @@ pass "non-macOS refusal"
 with_tmp "h264 path" test_h264_download_skips_conversion
 with_tmp "verbose backend output" test_verbose_shows_backend_output
 with_tmp "extra yt-dlp args forwarding" test_extra_yt_dlp_args_are_forwarded
+with_tmp "default no-playlist" test_download_defaults_to_no_playlist
+with_tmp "explicit playlist option" test_explicit_playlist_option_is_not_overridden
+with_tmp "audio-only m4a path" test_audio_only_downloads_m4a_and_skips_video_conversion
 with_tmp "cookies from named browser forwarding" test_cookies_from_named_browser_are_forwarded
 with_tmp "cookies default browser forwarding" test_cookies_default_to_safari
 with_tmp "torrent uses browser cookies and transmission" test_torrent_url_uses_browser_cookies_and_transmission

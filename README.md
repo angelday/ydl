@@ -5,8 +5,8 @@ preference for Apple-friendly H.264/H.265 output. Videos outside that codec
 family are converted to H.264 MP4. Torrent URLs are fetched with browser cookies
 from `yt-dlp` and downloaded with `transmission-cli`.
 
-`ydl` is built for a macOS workflow, with Apple-friendly video output and
-clipboard behavior.
+`ydl` is built for a macOS workflow, with Apple-friendly video and audio output
+and clipboard behavior.
 
 ![ydl 1.4 in action](ydl_1_3.png)
 
@@ -49,6 +49,12 @@ Download URLs from pasted clipboard text:
 
 ```sh
 ydl
+```
+
+Save only audio as M4A:
+
+```sh
+ydl -a "https://example.com/video"
 ```
 
 Use browser cookies when a site needs them:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+- Add `-a` / `--audio` to save only audio as M4A.
+- Default `yt-dlp` downloads to single-item mode with `--no-playlist`; pass
+  `--yes-playlist` explicitly to download a playlist.
+
 ## 1.4
 
 - Add `.torrent` URL support. Torrent files are fetched with browser cookies
