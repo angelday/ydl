@@ -188,6 +188,10 @@ STUB
 #!/bin/zsh
 set -e
 
+if [[ -n "$YDL_STUB_CURL_ARGS_FILE" ]]; then
+  printf '%s\n' "$@" > "$YDL_STUB_CURL_ARGS_FILE"
+fi
+
 output_file=""
 next_is_output=0
 
@@ -275,7 +279,7 @@ with_tmp() {
 test_help() {
   local output
   output=$("$BIN" -h)
-  assert_contains "$output" "ydl 1.4.1" "help shows version"
+  assert_contains "$output" "ydl 1.4.2" "help shows version"
   assert_contains "$output" "Usage: ydl" "help shows usage"
   assert_contains "$output" "--audio" "help shows audio option"
   assert_contains "$output" "--verbose" "help shows verbose option"
@@ -345,6 +349,16 @@ test_extra_yt_dlp_args_are_forwarded() {
   assert_contains "$args" "archive.txt" "extra yt-dlp option value is forwarded"
 }
 
+test_video_download_does_not_force_user_agent() {
+  local args_file args
+  args_file="$PWD/yt-dlp-args.txt"
+
+  YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video" >/dev/null
+  args=$(cat "$args_file")
+
+  assert_not_contains "$args" "--user-agent" "normal video downloads let yt-dlp manage request headers"
+}
+
 test_download_defaults_to_no_playlist() {
   local args_file args
   args_file="$PWD/yt-dlp-args.txt"
@@ -409,13 +423,15 @@ test_cookies_default_to_safari() {
 }
 
 test_torrent_url_uses_browser_cookies_and_transmission() {
-  local output args_file transmission_args_file settings_file args transmission_args settings
+  local output args_file curl_args_file transmission_args_file settings_file args curl_args transmission_args settings
   args_file="$PWD/yt-dlp-args.txt"
+  curl_args_file="$PWD/curl-args.txt"
   transmission_args_file="$PWD/transmission-args.txt"
   settings_file="$PWD/transmission-settings.json"
 
-  output=$(YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_TRANSMISSION_ARGS_FILE="$transmission_args_file" YDL_STUB_TRANSMISSION_SETTINGS_FILE="$settings_file" "$BIN" "https://example.com/download/movie.mkv.torrent?id=123")
+  output=$(YDL_STUB_ARGS_FILE="$args_file" YDL_STUB_CURL_ARGS_FILE="$curl_args_file" YDL_STUB_TRANSMISSION_ARGS_FILE="$transmission_args_file" YDL_STUB_TRANSMISSION_SETTINGS_FILE="$settings_file" "$BIN" "https://example.com/download/movie.mkv.torrent?id=123")
   args=$(cat "$args_file")
+  curl_args=$(cat "$curl_args_file")
   transmission_args=$(cat "$transmission_args_file")
   settings=$(cat "$settings_file")
 
@@ -426,6 +442,8 @@ test_torrent_url_uses_browser_cookies_and_transmission() {
   assert_contains "$args" "--skip-download" "torrent export does not download through yt-dlp"
   assert_contains "$args" "https://example.com/" "torrent cookie export uses site origin"
   assert_not_contains "$args" "https://example.com/download/movie.mkv.torrent?id=123" "torrent URL is not passed to yt-dlp"
+  assert_not_contains "$curl_args" "-A" "torrent fetch does not force curl user agent"
+  assert_not_contains "$curl_args" "--user-agent" "torrent fetch does not force curl user agent long option"
   assert_contains "$output" "Torrent  [############------------]  50%  1.0 MB/s" "torrent progress is rendered"
   assert_contains "$output" "Torrent  [########################] 100%" "torrent progress completes"
   assert_contains "$transmission_args" "-g" "transmission-cli gets isolated config directory"
@@ -846,6 +864,7 @@ pass "non-macOS refusal"
 with_tmp "h264 path" test_h264_download_skips_conversion
 with_tmp "verbose backend output" test_verbose_shows_backend_output
 with_tmp "extra yt-dlp args forwarding" test_extra_yt_dlp_args_are_forwarded
+with_tmp "default yt-dlp user agent" test_video_download_does_not_force_user_agent
 with_tmp "default no-playlist" test_download_defaults_to_no_playlist
 with_tmp "explicit playlist option" test_explicit_playlist_option_is_not_overridden
 with_tmp "audio-only m4a path" test_audio_only_downloads_m4a_and_skips_video_conversion

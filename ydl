@@ -5,7 +5,7 @@
 # Copyright (c) 2026 József Schaffer / Plastik média — MIT License
 
 set -e
-VERSION="1.4.1"
+VERSION="1.4.2"
 
 require_macos() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -231,8 +231,7 @@ run_ytdlp() {
   fi
 
   if [ "$VERBOSE" -eq 1 ]; then
-    yt-dlp --user-agent="$UA" \
-      "${COOKIES[@]}" \
+    yt-dlp "${COOKIES[@]}" \
       "${MODE_ARGS[@]}" \
       --xattrs \
       --concurrent-fragments 6 \
@@ -248,8 +247,7 @@ run_ytdlp() {
   rm -f "$PROGRESS_RENDERED_FILE" "$PROGRESS_ALREADY_DOWNLOADED_FILE"
 
   set +e
-  yt-dlp --user-agent="$UA" \
-    "${COOKIES[@]}" \
+  yt-dlp "${COOKIES[@]}" \
     "${MODE_ARGS[@]}" \
     --xattrs \
     --concurrent-fragments 6 \
@@ -421,7 +419,7 @@ EOF
     echo "Exporting $COOKIE_BROWSER cookies with yt-dlp..."
     export_browser_cookies "$COOKIE_BROWSER" "$COOKIE_JAR"
     echo "Fetching torrent file: $TORRENT_NAME"
-    curl -fL -b "$COOKIE_JAR" -e "$URL" -A "$UA" -o "$TORRENT_FILE" "$URL"
+    curl -fL -b "$COOKIE_JAR" -e "$URL" -o "$TORRENT_FILE" "$URL"
     echo "Downloading torrent payload with transmission-cli..."
     transmission-cli -g "$CONFIG_DIR" -w "$PWD" -M -f "$FINISH_SCRIPT" "$TORRENT_FILE"
     exit_code=$?
@@ -449,7 +447,7 @@ EOF
   fi
 
   set +e
-  curl -fL -sS -b "$COOKIE_JAR" -e "$URL" -A "$UA" -o "$TORRENT_FILE" "$URL" 2>"$LOG_FILE"
+  curl -fL -sS -b "$COOKIE_JAR" -e "$URL" -o "$TORRENT_FILE" "$URL" 2>"$LOG_FILE"
   exit_code=$?
   set -e
   if [ "$exit_code" -ne 0 ]; then
@@ -778,7 +776,6 @@ fi
 
 # Prefer H.264/H.265 video + M4A audio, fall back to best available
 FORMAT="(bestvideo[vcodec~='^((he|a)vc|h26[45])']+bestaudio[ext=m4a])/(bestvideo+bestaudio/best)"
-UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
 download_one() {
   local URL="$1"
