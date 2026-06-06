@@ -4,7 +4,7 @@
 
 `ydl` is built for a macOS workflow, with Apple-friendly video and audio output and clipboard behavior.
 
-![ydl 1.4 in action](ydl_1_3.png)
+![ydl in action](ydl_screenshot.png)
 
 ## Install
 
