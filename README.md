@@ -36,6 +36,14 @@ Download a URL:
 ydl "https://example.com/video"
 ```
 
+Default output stays concise and aligned:
+
+```text
+Download: https://example.com/video
+Downloading [########################] 100%  21.46 MiB/s
+Converting  [########################] 100%
+```
+
 Download URLs from pasted clipboard text:
 
 ```sh
@@ -64,6 +72,13 @@ Download a torrent URL:
 
 ```sh
 ydl "https://example.com/download/file.torrent?id=123"
+```
+
+Torrent payloads use the same progress style:
+
+```text
+Download: https://example.com/download/file.torrent?id=123
+Torrenting  [########################] 100%
 ```
 
 Torrent URLs always use browser cookies via `yt-dlp`; Safari is the default, and `-c chrome` / `-c firefox` selects another browser. Torrent payloads are downloaded with `transmission-cli` using an isolated temporary config with DHT, PEX, LPD, port forwarding, and RPC disabled. `ydl` exits after the payload finishes; use a regular torrent client for long-term seeding.

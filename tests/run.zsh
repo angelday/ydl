@@ -279,7 +279,7 @@ with_tmp() {
 test_help() {
   local output
   output=$("$BIN" -h)
-  assert_contains "$output" "ydl 1.4.2" "help shows version"
+  assert_contains "$output" "ydl 1.4.3" "help shows version"
   assert_contains "$output" "Usage: ydl" "help shows usage"
   assert_contains "$output" "--audio" "help shows audio option"
   assert_contains "$output" "--verbose" "help shows verbose option"
@@ -322,8 +322,9 @@ test_h264_download_skips_conversion() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "https://example.com/video")
 
   [[ -f download.mp4 ]] || fail "downloaded file exists"
-  assert_contains "$output" "Download [############------------]  50%" "download progress is rendered"
-  assert_contains "$output" "Download [########################] 100%" "download progress reaches 100"
+  assert_contains "$output" "Downloading [############------------]  50%" "download progress is rendered"
+  assert_contains "$output" "1.0 MiB/s" "download speed is spaced for readability"
+  assert_contains "$output" "Downloading [########################] 100%" "download progress reaches 100"
   assert_not_contains "$output" "Detected video codec" "default output hides codec details"
   assert_not_contains "$output" "No conversion needed." "default output hides no-op conversion"
 }
@@ -395,8 +396,8 @@ test_audio_only_downloads_m4a_and_skips_video_conversion() {
   assert_contains "$args" "m4a" "audio format is m4a"
   assert_contains "$args" "--no-playlist" "audio-only mode defaults to single-item downloads"
   assert_contains "$args" "after_move:filepath" "audio-only records final filepath"
-  assert_contains "$output" "Download [############------------]  50%" "audio download progress is rendered"
-  assert_not_contains "$output" "Converting [" "audio-only mode skips video conversion"
+  assert_contains "$output" "Downloading [############------------]  50%" "audio download progress is rendered"
+  assert_not_contains "$output" "Converting  [" "audio-only mode skips video conversion"
 }
 
 test_cookies_from_named_browser_are_forwarded() {
@@ -444,8 +445,8 @@ test_torrent_url_uses_browser_cookies_and_transmission() {
   assert_not_contains "$args" "https://example.com/download/movie.mkv.torrent?id=123" "torrent URL is not passed to yt-dlp"
   assert_not_contains "$curl_args" "-A" "torrent fetch does not force curl user agent"
   assert_not_contains "$curl_args" "--user-agent" "torrent fetch does not force curl user agent long option"
-  assert_contains "$output" "Torrent  [############------------]  50%  1.0 MB/s" "torrent progress is rendered"
-  assert_contains "$output" "Torrent  [########################] 100%" "torrent progress completes"
+  assert_contains "$output" "Torrenting  [############------------]  50%  1.0 MB/s" "torrent progress is rendered"
+  assert_contains "$output" "Torrenting  [########################] 100%" "torrent progress completes"
   assert_contains "$transmission_args" "-g" "transmission-cli gets isolated config directory"
   assert_contains "$transmission_args" "-w" "transmission-cli gets download directory option"
   assert_contains "$transmission_args" "$PWD" "transmission-cli downloads into current directory"
@@ -475,8 +476,8 @@ test_torrent_success_renders_final_100_percent() {
 
   output=$(YDL_STUB_TRANSMISSION_ONLY_99=1 "$BIN" "https://example.com/download/movie.torrent")
 
-  assert_contains "$output" "Torrent  [#######################-]  99%" "torrent progress can receive 99 percent"
-  assert_contains "$output" "Torrent  [########################] 100%" "successful torrent exit renders final 100 percent"
+  assert_contains "$output" "Torrenting  [#######################-]  99%" "torrent progress can receive 99 percent"
+  assert_contains "$output" "Torrenting  [########################] 100%" "successful torrent exit renders final 100 percent"
 }
 
 test_torrent_finish_hook_nonzero_is_success() {
@@ -488,7 +489,7 @@ test_torrent_finish_hook_nonzero_is_success() {
   set -e
 
   [[ "$exit_code" -eq 0 ]] || fail "finished torrent exits successfully despite finish hook termination"
-  assert_contains "$output" "Torrent  [########################] 100%" "finish hook completion renders 100 percent"
+  assert_contains "$output" "Torrenting  [########################] 100%" "finish hook completion renders 100 percent"
   assert_not_contains "$output" "Error: transmission-cli failed." "finish hook completion is not reported as failure"
 }
 
@@ -498,8 +499,8 @@ test_existing_download_is_reported() {
 
   assert_contains "$output" "Already downloaded." "existing download is reported"
   assert_not_contains "$output" "Already downloaded:" "default existing download hides filename"
-  assert_not_contains "$output" "Download [" "existing download ignores trailing yt-dlp 100 percent line"
-  assert_not_contains "$output" "Download [########################] 100%" "existing download does not render fake progress"
+  assert_not_contains "$output" "Downloading [" "existing download ignores trailing yt-dlp 100 percent line"
+  assert_not_contains "$output" "Downloading [########################] 100%" "existing download does not render fake progress"
 }
 
 test_vp9_download_converts_to_mp4() {
@@ -508,8 +509,8 @@ test_vp9_download_converts_to_mp4() {
 
   [[ -f download.mp4 ]] || fail "converted mp4 exists"
   [[ ! -f download.webm ]] || fail "source webm removed after conversion"
-  assert_contains "$output" "Converting [############------------]  50%" "vp9 conversion progress starts"
-  assert_contains "$output" "Converting [########################] 100%" "vp9 conversion progress completes"
+  assert_contains "$output" "Converting  [############------------]  50%" "vp9 conversion progress starts"
+  assert_contains "$output" "Converting  [########################] 100%" "vp9 conversion progress completes"
   assert_not_contains "$output" "Converted." "default conversion does not print extra completion line"
   assert_not_contains "$output" "Re-encoding vp9 → H.264" "default conversion hides codec detail"
   assert_not_contains "$output" "Re-encoding audio → AAC" "default conversion hides audio detail"
@@ -533,8 +534,8 @@ test_av1_download_converts_to_mp4() {
 
   [[ -f download.mp4 ]] || fail "converted av1 mp4 exists"
   [[ ! -f download.mkv ]] || fail "source mkv removed after conversion"
-  assert_contains "$output" "Converting [############------------]  50%" "av1 conversion progress starts"
-  assert_contains "$output" "Converting [########################] 100%" "av1 conversion progress completes"
+  assert_contains "$output" "Converting  [############------------]  50%" "av1 conversion progress starts"
+  assert_contains "$output" "Converting  [########################] 100%" "av1 conversion progress completes"
   assert_not_contains "$output" "Converted." "default av1 conversion does not print extra completion line"
 }
 
@@ -575,9 +576,9 @@ test_prose_with_multiple_urls_downloads_each() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
   assert_contains "$output" "Found 3 URLs." "multi-url count reported"
-  assert_contains "$output" "Downloading: https://example.com/video/one" "first fixture URL extracted"
-  assert_contains "$output" "Downloading: https://example.com/video/two?s=46" "second fixture URL strips trailing period"
-  assert_contains "$output" "Downloading: https://example.com/video/three" "third fixture URL strips closing parenthesis"
+  assert_contains "$output" "Download: https://example.com/video/one" "first fixture URL extracted"
+  assert_contains "$output" "Download: https://example.com/video/two?s=46" "second fixture URL strips trailing period"
+  assert_contains "$output" "Download: https://example.com/video/three" "third fixture URL strips closing parenthesis"
 }
 
 test_messy_note_fixture_extracts_urls() {
@@ -586,10 +587,10 @@ test_messy_note_fixture_extracts_urls() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
   assert_contains "$output" "Found 4 URLs." "messy fixture count reported"
-  assert_contains "$output" "Downloading: https://example.com/video/markdown" "markdown fixture URL extracted"
-  assert_contains "$output" "Downloading: https://example.com/video/quoted" "quoted fixture URL extracted"
-  assert_contains "$output" "Downloading: https://example.com/video/punctuation" "trailing punctuation stripped"
-  assert_contains "$output" "Downloading: https://example.com/video/curly" "curly wrapper stripped"
+  assert_contains "$output" "Download: https://example.com/video/markdown" "markdown fixture URL extracted"
+  assert_contains "$output" "Download: https://example.com/video/quoted" "quoted fixture URL extracted"
+  assert_contains "$output" "Download: https://example.com/video/punctuation" "trailing punctuation stripped"
+  assert_contains "$output" "Download: https://example.com/video/curly" "curly wrapper stripped"
 }
 
 test_single_note_fixture_downloads_one() {
@@ -597,7 +598,7 @@ test_single_note_fixture_downloads_one() {
   input=$(cat "$ROOT/testdata/notes-single.txt")
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_contains "$output" "Downloading: https://example.com/video/single?s=46" "single fixture URL extracted"
+  assert_contains "$output" "Download: https://example.com/video/single?s=46" "single fixture URL extracted"
 }
 
 test_x_note_fixture_extracts_urls() {
@@ -606,8 +607,8 @@ test_x_note_fixture_extracts_urls() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
   assert_contains "$output" "Found 2 URLs." "x fixture count reported"
-  assert_contains "$output" "Downloading: https://x.com/antoinellorca/status/2049796325160423678/video/1?s=46" "first x URL extracted"
-  assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "second x URL extracted"
+  assert_contains "$output" "Download: https://x.com/antoinellorca/status/2049796325160423678/video/1?s=46" "first x URL extracted"
+  assert_contains "$output" "Download: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "second x URL extracted"
 }
 
 test_sm_note_fixture_extracts_urls() {
@@ -616,10 +617,10 @@ test_sm_note_fixture_extracts_urls() {
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
   assert_contains "$output" "Found 4 URLs." "sm fixture count reported"
-  assert_contains "$output" "Downloading: https://x.com/emtbrides/status/2034623934700679397?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm navy seal URL extracted"
-  assert_contains "$output" "Downloading: https://x.com/pbakaus/status/2034410464424382824?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm radiant shaders URL extracted"
-  assert_contains "$output" "Downloading: https://x.com/steveschoger/status/2035077141050622173?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm claude design URL extracted"
-  assert_contains "$output" "Downloading: https://www.instagram.com/reel/DWJwNGnjWi9/?igsh=MTFwMzVvZTUxb2Zvaw==" "sm instagram URL extracted"
+  assert_contains "$output" "Download: https://x.com/emtbrides/status/2034623934700679397?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm navy seal URL extracted"
+  assert_contains "$output" "Download: https://x.com/pbakaus/status/2034410464424382824?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm radiant shaders URL extracted"
+  assert_contains "$output" "Download: https://x.com/steveschoger/status/2035077141050622173?s=46&t=VOhZI1qhfsq28OaSCFJNFg" "sm claude design URL extracted"
+  assert_contains "$output" "Download: https://www.instagram.com/reel/DWJwNGnjWi9/?igsh=MTFwMzVvZTUxb2Zvaw==" "sm instagram URL extracted"
 }
 
 test_real_url_fixture_extracts_urls() {
@@ -627,16 +628,18 @@ test_real_url_fixture_extracts_urls() {
   input=$(cat "$ROOT/testdata/urls.txt")
   output=$(YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_contains "$output" "Found 2 URLs." "real URL fixture count reported"
-  assert_contains "$output" "Downloading: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "real x URL extracted"
-  assert_contains "$output" "Downloading: https://test-videos.co.uk/vids/bigbuckbunny/webm/vp9/1080/Big_Buck_Bunny_1080_10s_5MB.webm" "real webm URL extracted"
+  assert_contains "$output" "Found 4 URLs." "real URL fixture count reported"
+  assert_contains "$output" "Download: https://x.com/TristanBlumen/status/2049699223419985984/video/1?s=46" "real x URL extracted"
+  assert_contains "$output" "Download: https://test-videos.co.uk/vids/bigbuckbunny/webm/vp9/1080/Big_Buck_Bunny_1080_10s_5MB.webm" "real webm URL extracted"
+  assert_contains "$output" "Download: https://www.facebook.com/reel/2065384310675953" "real facebook URL extracted"
+  assert_contains "$output" "Download: https://www.instagram.com/reels/DZKqMMJB7MC/" "real instagram URL extracted"
 }
 
 test_unknown_speed_is_hidden() {
   local output
   output=$(YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac YDL_STUB_UNKNOWN_SPEED=1 "$BIN" "https://example.com/video")
 
-  assert_contains "$output" "Download [########################] 100%" "unknown-speed progress reaches 100"
+  assert_contains "$output" "Downloading [########################] 100%" "unknown-speed progress reaches 100"
   assert_not_contains "$output" "Unknown B/s" "unknown speed is hidden"
 }
 
@@ -693,7 +696,7 @@ test_multi_url_continues_after_failure() {
   assert_contains "$output" "No video could be found in this tweet." "first failure is reported cleanly"
   assert_not_contains "$output" "Error: yt-dlp failed." "known no-video failure hides backend error header"
   assert_not_contains "$output" "Continuing with next URL." "failure continuation is implicit"
-  assert_contains "$output" "Downloading: https://example.com/good" "second URL is attempted"
+  assert_contains "$output" "Download: https://example.com/good" "second URL is attempted"
   assert_contains "$output" "Completed with 1 failure(s): 1 unavailable video." "failure summary is reported"
 }
 
@@ -809,8 +812,8 @@ test_no_video_marker_is_not_retried() {
 
   output=$(YDL_STUB_UNIQUE_OUTPUTS=1 YDL_STUB_EXT=mp4 YDL_STUB_VIDEO_CODEC=h264 YDL_STUB_AUDIO_CODEC=aac "$BIN" "$input")
 
-  assert_not_contains "$output" "Downloading: https://example.com/no-video" "marked no-video URL is skipped"
-  assert_contains "$output" "Downloading: https://example.com/good" "unmarked URL is still processed"
+  assert_not_contains "$output" "Download: https://example.com/no-video" "marked no-video URL is skipped"
+  assert_contains "$output" "Download: https://example.com/good" "unmarked URL is still processed"
 }
 
 test_clipboard_only_marked_urls_is_done() {
@@ -826,7 +829,7 @@ test_clipboard_only_marked_urls_is_done() {
   [[ "$exit_code" -eq 0 ]] || fail "clipboard with only marked URLs exits successfully"
   assert_contains "$output" "No actionable URLs found." "only marked clipboard reports no actionable URLs"
   assert_not_contains "$output" "Clipboard does not contain any valid URLs" "only marked clipboard is not treated as invalid"
-  assert_not_contains "$output" "Downloading:" "marked clipboard URLs are not downloaded"
+  assert_not_contains "$output" "Download:" "marked clipboard URLs are not downloaded"
 }
 
 test_clipboard_rewrite_preserves_spacing() {

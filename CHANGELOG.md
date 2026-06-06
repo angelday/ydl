@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.3
+
+- Refine default progress output for readability: URL lines now use `Download:`, active progress rows use aligned gerund labels (`Downloading`, `Converting`, `Torrenting`), and compact transfer speeds such as `21.46MiB/s` are shown as `21.46 MiB/s`.
+- Update URL fixture coverage for the current real URL test set.
+
 ## 1.4.2
 
 - Remove the hard-coded Safari user agent from video downloads and torrent file fetches, letting `yt-dlp` and `curl` use their own request defaults for better site compatibility.

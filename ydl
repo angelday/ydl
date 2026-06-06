@@ -5,7 +5,7 @@
 # Copyright (c) 2026 József Schaffer / Plastik média — MIT License
 
 set -e
-VERSION="1.4.2"
+VERSION="1.4.3"
 
 require_macos() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -107,12 +107,23 @@ render_progress() {
     bar="${bar}-"
   done
 
-  printf '\r\033[KDownload [%s] %3d%%' "$bar" "$whole"
+  printf '\r\033[K%-11s [%s] %3d%%' "Downloading" "$bar" "$whole"
   if [[ -n "$speed" && "$speed" != "N/A" && "$speed" != "Unknown" && "$speed" != "Unknown B/s" ]]; then
+    speed=$(format_progress_speed "$speed")
     printf '  %s' "$speed"
   fi
   if [[ -n "$eta" && "$eta" != "N/A" && "$eta" != "NA" && "$eta" != "Unknown" ]]; then
     printf '  ETA %s' "$eta"
+  fi
+}
+
+format_progress_speed() {
+  local speed="$1"
+
+  if [[ "$speed" =~ '^([0-9]+(\.[0-9]+)?)([KMGTP]?i?B/s)$' ]]; then
+    print -r -- "$match[1] $match[3]"
+  else
+    print -r -- "$speed"
   fi
 }
 
@@ -154,8 +165,9 @@ render_torrent_progress() {
     bar="${bar}-"
   done
 
-  printf '\r\033[KTorrent  [%s] %3d%%' "$bar" "$whole"
+  printf '\r\033[K%-11s [%s] %3d%%' "Torrenting" "$bar" "$whole"
   if [[ -n "$speed" && "$speed" != "0B" && "$speed" != "0B/s" ]]; then
+    speed=$(format_progress_speed "$speed")
     printf '  %s' "$speed"
   fi
   if [[ -n "$eta" && "$eta" != "0s" ]]; then
@@ -199,7 +211,7 @@ render_conversion_progress() {
     bar="${bar}-"
   done
 
-  printf '\r\033[KConverting [%s] %3d%%' "$bar" "$whole"
+  printf '\r\033[K%-11s [%s] %3d%%' "Converting" "$bar" "$whole"
 }
 
 run_ytdlp() {
@@ -783,7 +795,7 @@ download_one() {
   local DOWNLOAD_PATH_FILE
   local AUDIO_ARGS
 
-  echo "Downloading: $URL"
+  echo "Download: $URL"
 
   if looks_like_torrent_url "$URL"; then
     run_torrent "$URL"
