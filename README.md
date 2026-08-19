@@ -1,5 +1,3 @@
-
-
 # ydl
 
 `ydl` is a small zsh wrapper around `yt-dlp` for downloading video with a preference for Apple-friendly H.264/H.265 output. Videos outside that codec family are converted to H.264 MP4. Torrent URLs are fetched with browser cookies from `yt-dlp` and downloaded with `transmission-cli`.
